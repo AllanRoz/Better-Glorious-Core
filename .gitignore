@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Builds
+dist/
+*.exe
+
+# Test fixtures and temporary files
+test/mock-install/
+*.tmp
+*.new
+*.restore_tmp
+.DS_Store
+Thumbs.db

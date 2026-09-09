@@ -1,0 +1,47 @@
+{
+  "name": "better-glorious-core",
+  "version": "1.0.0",
+  "description": "Open-source mod and automated patcher for Glorious Core v2.x Electron application",
+  "main": "src/index.js",
+  "bin": {
+    "better-glorious-core": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "patch": "node src/index.js --patch",
+    "restore": "node src/index.js --restore",
+    "status": "node src/index.js --status",
+    "test": "node test/patcher.test.js",
+    "build": "pkg . --targets node18-win-x64 --output dist/better-glorious-core.exe"
+  },
+  "pkg": {
+    "scripts": [
+      "src/**/*.js"
+    ],
+    "assets": [
+      "src/mod/**/*"
+    ]
+  },
+  "keywords": [
+    "glorious-core",
+    "electron",
+    "mod",
+    "patcher",
+    "better-glorious-core"
+  ],
+  "author": "Better Glorious Core Team",
+  "license": "MIT",
+  "dependencies": {
+    "@electron/asar": "^3.2.14",
+    "chalk": "^4.1.2",
+    "commander": "^12.1.0",
+    "ora": "^5.4.1",
+    "prompts": "^2.4.2"
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "^5.14.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
