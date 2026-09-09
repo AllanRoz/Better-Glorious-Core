@@ -127,11 +127,11 @@ async function runTests() {
   assert(statusOutput.includes('Installation Status:'), 'CLI status output should contain status block');
 
   // Test patch flag
-  const patchOutput = execSync(`node "${cliPath}" --path "${mock.installDir}" --patch -f`, { encoding: 'utf8' });
+  const patchOutput = execSync(`node "${cliPath}" --path "${mock.installDir}" --patch -f --skip-process-check`, { encoding: 'utf8' });
   assert(patchOutput.includes('Better Glorious Core has been successfully installed!'), 'CLI patch should succeed');
 
   // Test restore flag
-  const restoreOutput = execSync(`node "${cliPath}" --path "${mock.installDir}" --restore -f`, { encoding: 'utf8' });
+  const restoreOutput = execSync(`node "${cliPath}" --path "${mock.installDir}" --restore -f --skip-process-check`, { encoding: 'utf8' });
   assert(restoreOutput.includes('Application successfully rolled back to official stock version.'), 'CLI restore should succeed');
 
   console.log('   ✔ CLI end-to-end execution passed.');

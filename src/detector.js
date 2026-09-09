@@ -115,6 +115,26 @@ function validateInstallation(dirPath) {
   };
 }
 
+const CONFIG_FILE = path.resolve(__dirname, '..', '.bgc-config.json');
+
+function loadSavedPath() {
+  if (!fs.existsSync(CONFIG_FILE)) return null;
+  try {
+    const data = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    return data.installDir || null;
+  } catch {
+    return null;
+  }
+}
+
+function savePath(installDir) {
+  try {
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify({ installDir }, null, 2), 'utf8');
+  } catch {
+    // Ignore write error
+  }
+}
+
 /**
  * Attempts to automatically find Glorious Core or inspect a user-specified path.
  * @param {string} [customPath]
@@ -122,21 +142,38 @@ function validateInstallation(dirPath) {
  */
 function findGloriousCore(customPath) {
   if (customPath) {
-    return validateInstallation(customPath);
+    const valid = validateInstallation(customPath);
+    if (valid) {
+      savePath(valid.installDir);
+    }
+    return valid;
   }
 
-  // 1. Check registry paths
+  // 1. Check previously saved path from config
+  const saved = loadSavedPath();
+  if (saved) {
+    const valid = validateInstallation(saved);
+    if (valid) return valid;
+  }
+
+  // 2. Check registry paths
   const regPaths = getRegistryPaths();
   for (const p of regPaths) {
     const valid = validateInstallation(p);
-    if (valid) return valid;
+    if (valid) {
+      savePath(valid.installDir);
+      return valid;
+    }
   }
 
-  // 2. Check common paths
+  // 3. Check common paths
   const commonPaths = getCommonPaths();
   for (const p of commonPaths) {
     const valid = validateInstallation(p);
-    if (valid) return valid;
+    if (valid) {
+      savePath(valid.installDir);
+      return valid;
+    }
   }
 
   return null;
@@ -146,5 +183,7 @@ module.exports = {
   getCommonPaths,
   getRegistryPaths,
   validateInstallation,
-  findGloriousCore
+  findGloriousCore,
+  loadSavedPath,
+  savePath
 };

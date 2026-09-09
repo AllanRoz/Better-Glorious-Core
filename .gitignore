@@ -13,3 +13,4 @@ test/mock-install/
 *.restore_tmp
 .DS_Store
 Thumbs.db
+.bgc-config.json

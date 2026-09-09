@@ -7,7 +7,7 @@ const ora = require('ora');
 const prompts = require('prompts');
 const { Command } = require('commander');
 
-const { findGloriousCore, validateInstallation } = require('./detector');
+const { findGloriousCore, validateInstallation, savePath } = require('./detector');
 const { getRunningProcesses, isAppRunning, killRunningProcesses } = require('./process');
 const { createBackup, hasBackup } = require('./backup');
 const { restoreStock } = require('./restorer');
@@ -99,14 +99,20 @@ async function resolveInstallTarget(customPath, nonInteractive = false) {
     throw new Error('Operation cancelled: No path provided.');
   }
 
-  return validateInstallation(response.customDir);
+  target = validateInstallation(response.customDir);
+  if (target) {
+    savePath(target.installDir);
+  }
+  return target;
 }
 
 /**
  * Executes the patching pipeline.
  */
 async function runPatchFlow(target, options = {}) {
-  await handleRunningProcesses(options.kill, options.force);
+  if (!options.skipProcessCheck) {
+    await handleRunningProcesses(options.kill, options.force);
+  }
 
   console.log(chalk.cyan(`\n📁 Target Directory: ${chalk.bold(target.installDir)}`));
 
@@ -166,7 +172,9 @@ async function runPatchFlow(target, options = {}) {
  * Executes the restore pipeline.
  */
 async function runRestoreFlow(target, options = {}) {
-  await handleRunningProcesses(options.kill, options.force);
+  if (!options.skipProcessCheck) {
+    await handleRunningProcesses(options.kill, options.force);
+  }
 
   console.log(chalk.cyan(`\n📁 Target Directory: ${chalk.bold(target.installDir)}`));
 
@@ -252,6 +260,7 @@ async function runInteractiveMenu(initialTarget, options) {
         const validated = validateInstallation(pathPrompt.dir);
         if (validated) {
           target = validated;
+          savePath(target.installDir);
           console.log(chalk.green('✔ Target directory updated.'));
         } else {
           console.log(chalk.red('✖ Invalid directory: resources/app.asar not found.'));
@@ -274,6 +283,7 @@ async function main() {
     .option('--path <path>', 'Specify custom Glorious Core installation directory')
     .option('-f, --force', 'Skip confirmation prompts')
     .option('--kill', 'Automatically terminate running Glorious Core processes')
+    .option('--skip-process-check', 'Bypass process check (for tests or headless runs)')
     .option('--unpack <pattern>', 'Custom unpack glob pattern for asar repacking');
 
   program.parse(process.argv);
