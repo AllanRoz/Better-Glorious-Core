@@ -1,5 +1,6 @@
 const { applyBranding } = require('./branding');
 const { injectHookLoader } = require('./hook-loader');
+const { applyBatteryPatch } = require('./battery');
 
 /**
  * Registry of active patches to run on the extracted asar.
@@ -14,6 +15,11 @@ const PATCHES = [
     name: 'Mod Loader Hook Injection',
     description: 'Embeds custom runtime scripts and hooks into Electron BrowserWindow creation',
     execute: (extractedDir) => injectHookLoader(extractedDir)
+  },
+  {
+    name: 'Battery Percentage & Telemetry Fix',
+    description: 'Enables numeric battery percentage in UI and fixes HID unpadded hex telemetry bug',
+    execute: (extractedDir) => applyBatteryPatch(extractedDir)
   }
 ];
 

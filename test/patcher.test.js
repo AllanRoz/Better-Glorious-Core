@@ -55,7 +55,7 @@ async function runTests() {
 
     // Run Patches
     const patchResults = runPatches(tempExtractDir);
-    assert.strictEqual(patchResults.length, 2, 'Should execute 2 registered patches');
+    assert.strictEqual(patchResults.length, 3, 'Should execute 3 registered patches');
 
     // Check package.json modifications
     const patchedPkg = JSON.parse(fs.readFileSync(path.join(tempExtractDir, 'package.json'), 'utf8'));
@@ -67,6 +67,16 @@ async function runTests() {
     assert(patchedMain.includes('Better Glorious Core Mod Loader Hook'), 'Main file should include hook require');
     assert(patchedMain.includes('handleName = "Better Glorious Core"'), 'handleName should be updated');
     assert(patchedMain.includes('setToolTip("Better Glorious Core")'), 'Tray tooltip should be updated');
+
+    // Check Battery Patch Main Process modifications
+    assert(patchedMain.includes('padStart(4, "0")'), 'Main file should normalize VID/PID with padStart');
+    assert(patchedMain.includes('parseInt(methodData.vid, 16) === rawVid'), 'Main file should include integer comparison in knownDevices');
+    assert(patchedMain.includes('((data[0] === 6 && data[1] === 251) || data[0] === 251)'), 'Main file should support stripped Report ID 251');
+    assert(patchedMain.includes('_bgcParseBattery'), 'Main file should include 255 charging sentinel helper');
+
+    // Check Battery Patch Renderer modifications
+    const patchedRendererJs = fs.readFileSync(path.join(tempExtractDir, 'out', 'renderer-process', 'assets', 'index-sample.js'), 'utf8');
+    assert(patchedRendererJs.includes('showValue: true'), 'Renderer bundle should have showValue: true');
 
     // Check renderer HTML modifications
     const patchedHtml = fs.readFileSync(path.join(tempExtractDir, 'out', 'renderer-process', 'index.html'), 'utf8');

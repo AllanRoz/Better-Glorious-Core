@@ -12,6 +12,7 @@ Similar in spirit to *BetterDiscord* or *ReVanced*, **Better Glorious Core** dis
 - 🛡️ **Fail-Safe Stock Backups**: Automatically creates `app.asar.original` before touching a single file. Guaranteed never to overwrite existing backups.
 - 🔄 **One-Command Rollback**: Instant restore to 100% clean vendor stock with `npm run restore` (or `--restore`).
 - 🛑 **Process Safety**: Verifies that Glorious Core is closed prior to modifying files, preventing file locks and archive corruption.
+- 🔋 **Battery Percentage & Telemetry Fix**: Unhides numerical percentage text (`showValue: true`) and resolves the unpadded hex VID/PID comparison bug (`0x93a` vs `0x093a`) that permanently freezes wireless mice (such as Model D 2 Wireless) at 100%.
 - 🎨 **Sleek Custom Aesthetics**: Injects modern dark mode styling, custom scrollbars, and non-intrusive status indicators without modifying minified vendor bundles directly.
 - 🔌 **Dynamic Mod Loader**: Injects an Electron `BrowserWindow` lifecycle hook into the main process, allowing live CSS and JavaScript injection into the renderer at runtime.
 - 📦 **Native Dependency Unpacking**: Pre-configured with Glorious Core's required unpacking glob: `{*.node,*@koromix*,*jszip*,*keytar*}`.
@@ -35,7 +36,8 @@ Better-Glorious-Core/
 │   ├── patches/
 │   │   ├── index.js           # Patch runner & registry
 │   │   ├── branding.js        # Rebrands app metadata, IPC pipe handle, & titles
-│   │   └── hook-loader.js     # Injects mod loader into out/main/index.js
+│   │   ├── hook-loader.js     # Injects mod loader into out/main/index.js
+│   │   └── battery.js         # Battery UI percentage & HID hex telemetry fix
 │   └── mod/
 │       ├── main-hook.js       # Main process runtime hook: browser window interceptor
 │       ├── renderer-hook.js   # Injected into DOM: banner, mod API, status badge

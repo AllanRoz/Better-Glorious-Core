@@ -135,11 +135,16 @@ async function runPatchFlow(target, options = {}) {
     spinner.succeed('ASAR archive extracted successfully.');
 
     // 4. Apply Patches
-    spinner.start('Applying branding and injecting mod loader hooks...');
+    spinner.start('Applying patches (branding, mod loader, battery telemetry fix)...');
     const patchResults = runPatches(tempDir);
     spinner.succeed('Patches applied successfully:');
     for (const p of patchResults) {
-      console.log(chalk.gray(`   ✔ ${p.name}`));
+      console.log(chalk.green(`   ✔ ${p.name}`));
+      if (p.result && Array.isArray(p.result.details)) {
+        for (const d of p.result.details) {
+          console.log(chalk.gray(`     ${d}`));
+        }
+      }
     }
 
     // 5. Repack asar with unpack glob pattern

@@ -37,6 +37,27 @@ const { app, BrowserWindow, Tray } = require('electron');
 const productName = "Glorious Core";
 const handleName = "Glorious Core";
 
+class HID {
+  static knownDevices = [
+    { vid: "0x093a", pid: "0x821a", name: "Glorious Model D 2 Wireless" }
+  ];
+
+  static async #deviceDataCallback(data, deviceInfo) {
+    const vid = \`0x\${deviceInfo.vid.toString(16).toLowerCase()}\`;
+    const pid = \`0x\${deviceInfo.pid.toString(16).toLowerCase()}\`;
+
+    const matched = HID.knownDevices.find(
+      (methodData) => methodData.vid.toLowerCase() === vid && methodData.pid.toLowerCase() === pid
+    );
+
+    if (data[0] === 6 && data[1] === 251) {
+      const isCharging = false;
+      const batteryLevel = data[2];
+      return { batteryLevel, isCharging };
+    }
+  }
+}
+
 function initApp() {
   const tray = new Tray();
   tray.setToolTip("Glorious Core");
@@ -46,9 +67,11 @@ initApp();
 `;
   fs.writeFileSync(path.join(mainDir, 'index.js'), mainJsContent, 'utf8');
 
-  // 3. Mock out/renderer-process/index.html
+  // 3. Mock out/renderer-process/index.html & assets/index-sample.js
   const rendererDir = path.join(stagingDir, 'out', 'renderer-process');
-  fs.mkdirSync(rendererDir, { recursive: true });
+  const assetsDir = path.join(rendererDir, 'assets');
+  fs.mkdirSync(assetsDir, { recursive: true });
+
   const htmlContent = `<!DOCTYPE html>
 <html>
 <head>
@@ -57,9 +80,26 @@ initApp();
 </head>
 <body>
   <div id="root"><h1>Glorious Core v2.1.0</h1></div>
+  <script src="./assets/index-sample.js"></script>
 </body>
 </html>`;
   fs.writeFileSync(path.join(rendererDir, 'index.html'), htmlContent, 'utf8');
+
+  const rendererJsContent = `
+// Sample minified renderer bundle
+const BatteryPill = {};
+function renderBattery(deviceState2) {
+  return [
+    BatteryPill,
+    {
+      value: deviceState2.hardwareStatus.batteryLevel,
+      isCharging: deviceState2.hardwareStatus.isCharging,
+      showValue: false
+    }
+  ];
+}
+`;
+  fs.writeFileSync(path.join(assetsDir, 'index-sample.js'), rendererJsContent, 'utf8');
 
   // 4. Mock a native dependency to test unpack patterns: keytar and usb_addon.node
   const nativeDir = path.join(stagingDir, 'node_modules', 'keytar');
