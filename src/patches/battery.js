@@ -193,13 +193,21 @@ ${sentinelHelperSignature}
 const _bgcLastBatteryMap = (global._bgcLastBatteryMap = global._bgcLastBatteryMap || new Map());
 function _bgcParseBattery(deviceId, rawValue, currentChargingState) {
   const key = String(deviceId || 'default');
+  let level;
+  let isCharging = Boolean(currentChargingState);
   if (rawValue === 255) {
-    const lastValid = _bgcLastBatteryMap.get(key) || 100;
-    return { batteryLevel: lastValid, isCharging: true };
+    level = _bgcLastBatteryMap.get(key) || 100;
+    isCharging = true;
+  } else {
+    level = Math.max(0, Math.min(100, Number(rawValue) || 0));
+    _bgcLastBatteryMap.set(key, level);
   }
-  const level = Math.max(0, Math.min(100, Number(rawValue) || 0));
-  _bgcLastBatteryMap.set(key, level);
-  return { batteryLevel: level, isCharging: Boolean(currentChargingState) };
+  if (typeof global._bgcOnBatteryUpdate === 'function') {
+    try {
+      global._bgcOnBatteryUpdate(key, level, isCharging);
+    } catch (_) {}
+  }
+  return { batteryLevel: level, isCharging };
 }
 `;
     // Prepend or inject helper near top of file

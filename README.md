@@ -13,6 +13,7 @@ Similar in spirit to *BetterDiscord* or *ReVanced*, **Better Glorious Core** dis
 - 🔄 **One-Command Rollback**: Instant restore to 100% clean vendor stock with `npm run restore` (or `--restore`).
 - 🛑 **Process Safety**: Verifies that Glorious Core is closed prior to modifying files, preventing file locks and archive corruption.
 - 🔋 **Battery Percentage & Telemetry Fix**: Unhides numerical percentage text (`showValue: true`) and resolves the unpadded hex VID/PID comparison bug (`0x93a` vs `0x093a`) that permanently freezes wireless mice (such as Model D 2 Wireless) at 100%.
+- ⚡ **System Tray Battery & Toast Alerts**: Displays live wireless mouse battery levels in the Windows system tray tooltip and delivers native toast notifications when battery drops to `<= 15%`.
 - 🛡️ **Telemetry & Analytics Blocker**: Neutralizes Sentry error reporting and installs a network-level interceptor blocking outgoing traffic to Mixpanel, Google Analytics, Sentry, and Glorious tracking domains.
 - 🎨 **Sleek Custom Aesthetics**: Injects modern dark mode styling, custom scrollbars, and non-intrusive status indicators without modifying minified vendor bundles directly.
 - 🔌 **Dynamic Mod Loader**: Injects an Electron `BrowserWindow` lifecycle hook into the main process, allowing live CSS and JavaScript injection into the renderer at runtime.

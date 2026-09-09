@@ -61,6 +61,77 @@ try {
     });
   }
 
+  // -------------------------------------------------------------
+  // System Tray Live Battery Tooltip & Low-Battery Notifications
+  // -------------------------------------------------------------
+  let activeTray = null;
+  const OriginalTray = electron.Tray;
+
+  if (OriginalTray) {
+    class BetterTray extends OriginalTray {
+      constructor(...args) {
+        super(...args);
+        activeTray = this;
+        global._bgcTray = this;
+      }
+    }
+    Object.setPrototypeOf(BetterTray, OriginalTray);
+    electron.Tray = BetterTray;
+  }
+
+  const _deviceBatteryStates = new Map();
+  const _lastNotified = new Map(); // deviceId -> timestamp
+
+  function updateTrayBattery(deviceId, level, isCharging) {
+    _deviceBatteryStates.set(deviceId, { level, isCharging, time: Date.now() });
+
+    const tray = activeTray || global._bgcTray;
+    if (tray && typeof tray.setToolTip === 'function') {
+      let tooltipText = 'Better Glorious Core';
+      for (const [id, state] of _deviceBatteryStates.entries()) {
+        const chargingIcon = state.isCharging ? ' ⚡ (Charging)' : '';
+        const name = (id && id !== 'default') ? id : 'Wireless Mouse';
+        tooltipText += `\n${name}: ${state.level}%${chargingIcon}`;
+      }
+      try {
+        tray.setToolTip(tooltipText);
+      } catch (_) {}
+    }
+  }
+
+  function checkLowBatteryNotification(deviceId, level, isCharging) {
+    if (isCharging) return; // Do not alert when charging
+
+    const now = Date.now();
+    const lastAlert = _lastNotified.get(deviceId) || 0;
+    const cooldownMs = 15 * 60 * 1000; // 15-minute cooldown per device
+
+    if (level <= 15 && (now - lastAlert > cooldownMs)) {
+      _lastNotified.set(deviceId, now);
+
+      try {
+        const { Notification } = electron;
+        if (Notification && Notification.isSupported && Notification.isSupported()) {
+          const isCritical = level <= 5;
+          const notification = new Notification({
+            title: isCritical ? '⚠️ Critical Mouse Battery!' : '🔋 Low Mouse Battery Warning',
+            body: `Your wireless mouse battery is at ${level}%. Please plug in USB power soon!`,
+            urgency: isCritical ? 'critical' : 'normal'
+          });
+          notification.show();
+        }
+      } catch (err) {
+        console.error('[Better Glorious Core] Notification error:', err.message);
+      }
+    }
+  }
+
+  // Register battery telemetry event listener
+  global._bgcOnBatteryUpdate = function (deviceId, level, isCharging) {
+    updateTrayBattery(deviceId, level, isCharging);
+    checkLowBatteryNotification(deviceId, level, isCharging);
+  };
+
   // Network-level Telemetry & Analytics Blocker
   const TELEMETRY_URL_PATTERNS = [
     '*://*.sentry.io/*',

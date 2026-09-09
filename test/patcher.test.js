@@ -73,6 +73,7 @@ async function runTests() {
     assert(patchedMain.includes('parseInt(methodData.vid, 16) === rawVid'), 'Main file should include integer comparison in knownDevices');
     assert(patchedMain.includes('((data[0] === 6 && data[1] === 251) || data[0] === 251)'), 'Main file should support stripped Report ID 251');
     assert(patchedMain.includes('_bgcParseBattery'), 'Main file should include 255 charging sentinel helper');
+    assert(patchedMain.includes('_bgcOnBatteryUpdate'), 'Main file should dispatch _bgcOnBatteryUpdate event for tray and notifications');
 
     // Check Telemetry Blocker Patch modifications
     assert(patchedMain.includes('enabled:false,'), 'Main file should disable Sentry initialization');
