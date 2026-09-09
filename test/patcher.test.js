@@ -55,7 +55,7 @@ async function runTests() {
 
     // Run Patches
     const patchResults = runPatches(tempExtractDir);
-    assert.strictEqual(patchResults.length, 4, 'Should execute 4 registered patches');
+    assert.strictEqual(patchResults.length, 5, 'Should execute 5 registered patches');
 
     // Check package.json modifications
     const patchedPkg = JSON.parse(fs.readFileSync(path.join(tempExtractDir, 'package.json'), 'utf8'));
@@ -79,6 +79,11 @@ async function runTests() {
     assert(patchedMain.includes('enabled:false,'), 'Main file should disable Sentry initialization');
     assert(patchedMain.includes('function trackEvent(name, data) {return;'), 'Main file should neutralize telemetry functions');
     assert(patchedMain.includes('BGC_DISABLE_TELEMETRY'), 'Main file should include telemetry blocker signature');
+
+    // Check Auto-Updater Blocker modifications
+    assert(patchedMain.includes('disabled by BGC'), 'Main file should neutralize autoUpdater.checkForUpdates');
+    assert(patchedMain.includes('autoDownload = false'), 'Main file should disable autoDownload');
+    assert(patchedMain.includes('Auto-Updater Locked'), 'Main file should include updater lock guard');
 
     // Check Battery Patch Renderer modifications
     const patchedRendererJs = fs.readFileSync(path.join(tempExtractDir, 'out', 'renderer-process', 'assets', 'index-sample.js'), 'utf8');

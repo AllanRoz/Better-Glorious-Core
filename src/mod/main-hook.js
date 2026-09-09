@@ -141,7 +141,10 @@ try {
     '*://*.stats.gloriousgaming.com/*',
     '*://*.telemetry.gloriousgaming.com/*',
     '*://*.gloriousgaming.com/api/telemetry/*',
-    '*://*.gloriousgaming.com/api/analytics/*'
+    '*://*.gloriousgaming.com/api/analytics/*',
+    '*://*.gloriousgaming.com/api/update*',
+    '*://*.gloriousgaming.com/downloads/core*',
+    '*://update.electronjs.org/*'
   ];
 
   function setupTelemetryBlocker() {

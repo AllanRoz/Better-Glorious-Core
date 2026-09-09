@@ -43,6 +43,9 @@ function trackEvent(name, data) {
   console.log("Telemetry event:", name);
 }
 
+const autoUpdater = { checkForUpdatesAndNotify: function() {}, autoDownload: true };
+autoUpdater.checkForUpdatesAndNotify();
+
 class HID {
   static knownDevices = [
     { vid: "0x093a", pid: "0x821a", name: "Glorious Model D 2 Wireless" }

@@ -2,6 +2,7 @@ const { applyBranding } = require('./branding');
 const { injectHookLoader } = require('./hook-loader');
 const { applyBatteryPatch } = require('./battery');
 const { applyTelemetryPatch } = require('./telemetry');
+const { applyUpdaterPatch } = require('./updater');
 
 /**
  * Registry of active patches to run on the extracted asar.
@@ -26,6 +27,11 @@ const PATCHES = [
     name: 'Telemetry & Analytics Blocker',
     description: 'Disables Sentry crash reporting and blocks background usage tracking',
     execute: (extractedDir) => applyTelemetryPatch(extractedDir)
+  },
+  {
+    name: 'Auto-Updater Blocker',
+    description: 'Disables automatic update checks and locks modded app.asar against silent overwrites',
+    execute: (extractedDir) => applyUpdaterPatch(extractedDir)
   }
 ];
 

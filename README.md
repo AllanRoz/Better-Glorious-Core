@@ -15,6 +15,7 @@ Similar in spirit to *BetterDiscord* or *ReVanced*, **Better Glorious Core** dis
 - 🔋 **Battery Percentage & Telemetry Fix**: Unhides numerical percentage text (`showValue: true`) and resolves the unpadded hex VID/PID comparison bug (`0x93a` vs `0x093a`) that permanently freezes wireless mice (such as Model D 2 Wireless) at 100%.
 - ⚡ **System Tray Battery & Toast Alerts**: Displays live wireless mouse battery levels in the Windows system tray tooltip and delivers native toast notifications when battery drops to `<= 15%`.
 - 🛡️ **Telemetry & Analytics Blocker**: Neutralizes Sentry error reporting and installs a network-level interceptor blocking outgoing traffic to Mixpanel, Google Analytics, Sentry, and Glorious tracking domains.
+- 🔒 **Auto-Updater Blocker**: Disables automatic background update checks and downloads, preventing vendor updates from silently overwriting your modded `app.asar`.
 - 🎨 **Sleek Custom Aesthetics**: Injects modern dark mode styling, custom scrollbars, and non-intrusive status indicators without modifying minified vendor bundles directly.
 - 🔌 **Dynamic Mod Loader**: Injects an Electron `BrowserWindow` lifecycle hook into the main process, allowing live CSS and JavaScript injection into the renderer at runtime.
 - 📦 **Native Dependency Unpacking**: Pre-configured with Glorious Core's required unpacking glob: `{*.node,*@koromix*,*jszip*,*keytar*}`.
@@ -40,7 +41,8 @@ Better-Glorious-Core/
 │   │   ├── branding.js        # Rebrands app metadata, IPC pipe handle, & titles
 │   │   ├── hook-loader.js     # Injects mod loader into out/main/index.js
 │   │   ├── battery.js         # Battery UI percentage & HID hex telemetry fix
-│   │   └── telemetry.js       # Sentry & analytics blocker
+│   │   ├── telemetry.js       # Sentry & analytics blocker
+│   │   └── updater.js         # Auto-updater blocker & app.asar lock
 │   └── mod/
 │       ├── main-hook.js       # Main process runtime hook: browser window interceptor & network blocker
 │       ├── renderer-hook.js   # Injected into DOM: banner, mod API, status badge
