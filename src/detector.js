@@ -128,6 +128,10 @@ function loadSavedPath() {
 }
 
 function savePath(installDir) {
+  // Never save test fixture mock directories
+  if (!installDir || installDir.includes('mock-install') || installDir.includes('test')) {
+    return;
+  }
   try {
     fs.writeFileSync(CONFIG_FILE, JSON.stringify({ installDir }, null, 2), 'utf8');
   } catch {
@@ -142,11 +146,7 @@ function savePath(installDir) {
  */
 function findGloriousCore(customPath) {
   if (customPath) {
-    const valid = validateInstallation(customPath);
-    if (valid) {
-      savePath(valid.installDir);
-    }
-    return valid;
+    return validateInstallation(customPath);
   }
 
   // 1. Check previously saved path from config
@@ -160,20 +160,14 @@ function findGloriousCore(customPath) {
   const regPaths = getRegistryPaths();
   for (const p of regPaths) {
     const valid = validateInstallation(p);
-    if (valid) {
-      savePath(valid.installDir);
-      return valid;
-    }
+    if (valid) return valid;
   }
 
   // 3. Check common paths
   const commonPaths = getCommonPaths();
   for (const p of commonPaths) {
     const valid = validateInstallation(p);
-    if (valid) {
-      savePath(valid.installDir);
-      return valid;
-    }
+    if (valid) return valid;
   }
 
   return null;
