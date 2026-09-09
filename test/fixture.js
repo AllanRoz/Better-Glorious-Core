@@ -36,6 +36,12 @@ async function createMockInstallation(targetDir) {
 const { app, BrowserWindow, Tray } = require('electron');
 const productName = "Glorious Core";
 const handleName = "Glorious Core";
+const Sentry = { init: function(opts) {} };
+Sentry.init({ dsn: "https://mock@sentry.io/123" });
+
+function trackEvent(name, data) {
+  console.log("Telemetry event:", name);
+}
 
 class HID {
   static knownDevices = [

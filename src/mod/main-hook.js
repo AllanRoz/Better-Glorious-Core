@@ -60,6 +60,42 @@ try {
       attachModToWindow(win);
     });
   }
+
+  // Network-level Telemetry & Analytics Blocker
+  const TELEMETRY_URL_PATTERNS = [
+    '*://*.sentry.io/*',
+    '*://*.mixpanel.com/*',
+    '*://*.google-analytics.com/*',
+    '*://*.googletagmanager.com/*',
+    '*://*.stats.gloriousgaming.com/*',
+    '*://*.telemetry.gloriousgaming.com/*',
+    '*://*.gloriousgaming.com/api/telemetry/*',
+    '*://*.gloriousgaming.com/api/analytics/*'
+  ];
+
+  function setupTelemetryBlocker() {
+    try {
+      const { session } = electron;
+      if (session && session.defaultSession && session.defaultSession.webRequest) {
+        session.defaultSession.webRequest.onBeforeRequest(
+          { urls: TELEMETRY_URL_PATTERNS },
+          (details, callback) => {
+            // Cancel telemetry and analytics network requests
+            callback({ cancel: true });
+          }
+        );
+        console.log('\x1b[32m[Better Glorious Core]\x1b[0m Telemetry & Analytics network blocker active.');
+      }
+    } catch (err) {
+      console.error('[Better Glorious Core] Failed to register network blocker:', err.message);
+    }
+  }
+
+  if (app && app.isReady && app.isReady()) {
+    setupTelemetryBlocker();
+  } else if (app && app.whenReady) {
+    app.whenReady().then(setupTelemetryBlocker).catch(() => {});
+  }
 } catch (err) {
   console.error('[Better Glorious Core] Hook initialization error:', err);
 }

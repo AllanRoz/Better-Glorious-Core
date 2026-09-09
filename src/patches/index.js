@@ -1,6 +1,7 @@
 const { applyBranding } = require('./branding');
 const { injectHookLoader } = require('./hook-loader');
 const { applyBatteryPatch } = require('./battery');
+const { applyTelemetryPatch } = require('./telemetry');
 
 /**
  * Registry of active patches to run on the extracted asar.
@@ -20,6 +21,11 @@ const PATCHES = [
     name: 'Battery Percentage & Telemetry Fix',
     description: 'Enables numeric battery percentage in UI and fixes HID unpadded hex telemetry bug',
     execute: (extractedDir) => applyBatteryPatch(extractedDir)
+  },
+  {
+    name: 'Telemetry & Analytics Blocker',
+    description: 'Disables Sentry crash reporting and blocks background usage tracking',
+    execute: (extractedDir) => applyTelemetryPatch(extractedDir)
   }
 ];
 
