@@ -74,6 +74,7 @@ async function runTests() {
     assert(patchedMain.includes('((data[0] === 6 && data[1] === 251) || data[0] === 251)'), 'Main file should support stripped Report ID 251');
     assert(patchedMain.includes('_bgcParseBattery'), 'Main file should include 255 charging sentinel helper');
     assert(patchedMain.includes('_bgcOnBatteryUpdate'), 'Main file should dispatch _bgcOnBatteryUpdate event for tray and notifications');
+    assert(patchedMain.includes('this.requestBatteryStatsAndUpdateIfSuccessful(device2).catch'), 'Main file should inject immediate battery query on startup');
 
     // Check Telemetry Blocker Patch modifications
     assert(patchedMain.includes('enabled:false,'), 'Main file should disable Sentry initialization');
@@ -88,6 +89,7 @@ async function runTests() {
     // Check Battery Patch Renderer modifications
     const patchedRendererJs = fs.readFileSync(path.join(tempExtractDir, 'out', 'renderer-process', 'assets', 'index-sample.js'), 'utf8');
     assert(patchedRendererJs.includes('showValue: true'), 'Renderer bundle should have showValue: true');
+    assert(patchedRendererJs.includes('bgc_bat_'), 'Renderer bundle should include persistent battery cache');
 
     // Check renderer HTML modifications
     const patchedHtml = fs.readFileSync(path.join(tempExtractDir, 'out', 'renderer-process', 'index.html'), 'utf8');

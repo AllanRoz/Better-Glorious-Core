@@ -65,6 +65,23 @@ class HID {
       return { batteryLevel, isCharging };
     }
   }
+
+  static async requestBatteryStatsAndUpdateIfSuccessful(device) {
+    return true;
+  }
+
+  static setupDevice(device) {
+    let batteryStatsInterval = null;
+    const startBatteryStatsInterval = (device2, connectionMethod, interval = 10000) => {
+      if (batteryStatsInterval) {
+        clearInterval(batteryStatsInterval);
+      }
+      batteryStatsInterval = setInterval(async () => {
+        await this.requestBatteryStatsAndUpdateIfSuccessful(device2);
+      }, interval);
+    };
+    startBatteryStatsInterval(device, "Reciever");
+  }
 }
 
 function initApp() {

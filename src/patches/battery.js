@@ -80,6 +80,16 @@ function patchRendererBatteryPill(extractedDir) {
       '$1true'
     );
 
+    // Pattern 5: Persistent battery cache on startup
+    // Replaces value: deviceState2.hardwareStatus.batteryLevel with a cached getter/setter
+    const valuePattern = /value\s*:\s*([a-zA-Z0-9_$]+)\.hardwareStatus\.batteryLevel/g;
+    if (valuePattern.test(content)) {
+      content = content.replace(
+        valuePattern,
+        'value: (function(dev) { try { const cur = dev?.hardwareStatus?.batteryLevel; const k = "bgc_bat_" + (dev?.productId || "mouse"); if (typeof cur === "number" && cur >= 0 && cur <= 100) { try { localStorage.setItem(k, String(cur)); } catch(_) {} return cur; } const cached = localStorage.getItem(k); if (cached !== null && !isNaN(Number(cached))) return Number(cached); return cur; } catch(_) { return dev?.hardwareStatus?.batteryLevel; } })($1)'
+      );
+    }
+
     if (content !== original) {
       fs.writeFileSync(file, content, 'utf8');
       patched = true;
@@ -238,6 +248,18 @@ function _bgcParseBattery(deviceId, rawValue, currentChargingState) {
         statusLogs.push('Patched 255 charging sentinel into direct batteryLevel variable assignment');
       }
     }
+  }
+
+  // -------------------------------------------------------------
+  // Part C: Instant Battery Query on Device Connect (0ms delay)
+  // -------------------------------------------------------------
+  const startIntervalPattern = /(const\s+startBatteryStatsInterval\s*=\s*\(([a-zA-Z0-9_$]+),\s*([a-zA-Z0-9_$]+)[^)]*\)\s*=>\s*\{[\s\S]*?if\s*\(batteryStatsInterval\)\s*\{\s*clearInterval\(batteryStatsInterval\);\s*\})/g;
+  if (startIntervalPattern.test(content)) {
+    content = content.replace(
+      startIntervalPattern,
+      '$1\n        try { this.requestBatteryStatsAndUpdateIfSuccessful($2).catch(() => {}); } catch (_) {}'
+    );
+    statusLogs.push('Injected immediate HID battery query on device connection (0ms startup latency)');
   }
 
   if (content !== original) {

@@ -73,6 +73,7 @@ try {
         super(...args);
         activeTray = this;
         global._bgcTray = this;
+        setTimeout(() => updateTrayBattery(), 100);
       }
     }
     Object.setPrototypeOf(BetterTray, OriginalTray);
@@ -82,8 +83,41 @@ try {
   const _deviceBatteryStates = new Map();
   const _lastNotified = new Map(); // deviceId -> timestamp
 
+  const CACHE_FILE = path.join(
+    (app && app.getPath) ? app.getPath('userData') : (process.env.APPDATA || __dirname),
+    'bgc-battery-cache.json'
+  );
+
+  function loadBatteryCache() {
+    try {
+      if (fs.existsSync(CACHE_FILE)) {
+        const raw = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+        if (typeof raw === 'object' && raw !== null) {
+          for (const [k, v] of Object.entries(raw)) {
+            _deviceBatteryStates.set(k, v);
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  function saveBatteryCache() {
+    try {
+      const obj = {};
+      for (const [k, v] of _deviceBatteryStates.entries()) {
+        obj[k] = v;
+      }
+      fs.writeFileSync(CACHE_FILE, JSON.stringify(obj), 'utf8');
+    } catch (_) {}
+  }
+
+  loadBatteryCache();
+
   function updateTrayBattery(deviceId, level, isCharging) {
-    _deviceBatteryStates.set(deviceId, { level, isCharging, time: Date.now() });
+    if (deviceId && typeof level === 'number') {
+      _deviceBatteryStates.set(deviceId, { level, isCharging, time: Date.now() });
+      saveBatteryCache();
+    }
 
     const tray = activeTray || global._bgcTray;
     if (tray && typeof tray.setToolTip === 'function') {
