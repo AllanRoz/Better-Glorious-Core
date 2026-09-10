@@ -107,6 +107,16 @@
       }
     });
 
+    ipcRenderer.on('bgc:battery-update', (event, data) => {
+      if (data) {
+        if (typeof data.level === 'number') {
+          _lastBatteryLevel = data.level;
+        }
+        enhanceBatteryPillsInDOM();
+        updateBadge();
+      }
+    });
+
     ipcRenderer.on('bgc:system-sleep', (event, data) => {
       if (data && data.active) {
         document.body.classList.add('bgc-system-dimmed');
@@ -116,10 +126,67 @@
     });
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', updateBadge);
-  } else {
+  // Battery value formatter (e.g. 99% (~62h) next to battery icon)
+  window._bgcFormatBattery = function (val, isChg) {
+    if (val == null || isNaN(val)) return void 0;
+    const n = Number(val);
+    if (isChg) {
+      if (n >= 100) return '100%';
+      const mins = Math.round(((100 - n) / 50) * 60);
+      return mins > 0 && mins < 180 ? `${n}% (~${mins}m)` : `${n}% (Charging)`;
+    }
+    let rate = 1.6;
+    if (typeof window._bgcDischargeRate === 'number' && window._bgcDischargeRate >= 0.5 && window._bgcDischargeRate <= 20) {
+      rate = window._bgcDischargeRate;
+    }
+    const hrs = Math.max(1, Math.round(n / rate));
+    return `${n}% (~${hrs}h)`;
+  };
+
+  // Enhance existing or dynamically rendered battery pills in the DOM
+  function enhanceBatteryPillsInDOM() {
+    try {
+      const pills = document.querySelectorAll('[class*="battery-pill"], [class*="_battery-pill_"]');
+      pills.forEach((pill) => {
+        const valElem = pill.querySelector('[class*="value"], [class*="_value_"]');
+        if (valElem && valElem.textContent) {
+          const txt = valElem.textContent.trim();
+          const match = txt.match(/^(\d{1,3})%$/);
+          if (match) {
+            const num = parseInt(match[1], 10);
+            const isCharging = pill.className.includes('charging');
+            const formatted = window._bgcFormatBattery(num, isCharging);
+            if (formatted && formatted !== txt) {
+              valElem.textContent = formatted;
+            }
+          }
+        }
+      });
+    } catch (_) {}
+  }
+
+  function initRendererHooks() {
     updateBadge();
+    enhanceBatteryPillsInDOM();
+
+    try {
+      const observer = new MutationObserver(() => {
+        enhanceBatteryPillsInDOM();
+      });
+      observer.observe(document.body || document.documentElement, {
+        childList: true,
+        subtree: true,
+        characterData: true
+      });
+    } catch (_) {}
+
+    setInterval(enhanceBatteryPillsInDOM, 2500);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initRendererHooks);
+  } else {
+    initRendererHooks();
   }
 })();
 

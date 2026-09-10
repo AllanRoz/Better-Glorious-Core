@@ -124,6 +124,9 @@ function renderBattery(deviceState2) {
     }
   ];
 }
+const BatteryPill$1 = ({ isCharging = false, value2 = 100 }) => {
+  return jsxRuntimeExports.jsx("div", { className: "value", children: isNaN(value2) ? void 0 : \`\${value2}%\` });
+};
 `;
   fs.writeFileSync(path.join(assetsDir, 'index-sample.js'), rendererJsContent, 'utf8');
 

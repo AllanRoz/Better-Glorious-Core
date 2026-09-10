@@ -87,6 +87,14 @@ if (electron) {
   const userDataDir = (app && app.getPath) ? app.getPath('userData') : (process.env.APPDATA || __dirname);
   const POWER_CONFIG_FILE = path.join(userDataDir, 'bgc-power-config.json');
   const BATTERY_CACHE_FILE = path.join(userDataDir, 'bgc-battery-cache.json');
+  const DEBUG_LOG_FILE = path.join(userDataDir, 'bgc-debug.log');
+
+  function logDebug(msg) {
+    try {
+      fs.appendFileSync(DEBUG_LOG_FILE, `[${new Date().toISOString()}] ${msg}\n`, 'utf8');
+    } catch (_) {}
+  }
+  logDebug('Better Glorious Core main process hook initialized.');
 
   const DEFAULT_POWER_CONFIG = {
     ecoModeEnabled: true,
@@ -112,11 +120,53 @@ if (electron) {
     } catch (_) {}
   }
 
-  function savePowerConfig() {
+  let defaultDeviceName = 'Model D 2 Wireless';
+  let currentDpiStage = 1;
+  let totalDpiStages = 4;
+  let lastKnownDpi = 800;
+  let cachedDpiStages = [
+    { value: 400, color: '#FFA40D' },
+    { value: 800, color: '#26B4FF' },
+    { value: 1600, color: '#FF2626' },
+    { value: 3200, color: '#18B30A' }
+  ];
+
+  function loadInitialProfileData() {
     try {
-      fs.writeFileSync(POWER_CONFIG_FILE, JSON.stringify(powerConfig, null, 2), 'utf8');
+      const devFile = path.join(userDataDir, 'datastore', 'Devices.json');
+      const profFile = path.join(userDataDir, 'datastore', 'DeviceProfiles.json');
+
+      if (fs.existsSync(profFile)) {
+        const profData = JSON.parse(fs.readFileSync(profFile, 'utf8'));
+        const profiles = profData?.profiles || (Array.isArray(profData) ? profData : []);
+        for (const p of profiles) {
+          const perf = p?.mousePerformanceRecord || p?.mousePerformanceState;
+          if (perf && Array.isArray(perf.DpiStage) && perf.DpiStage.length > 0) {
+            cachedDpiStages = perf.DpiStage;
+            totalDpiStages = perf.DpiStage.length;
+            if (typeof perf.dpiSelectIndex === 'number') {
+              currentDpiStage = perf.dpiSelectIndex + 1;
+            }
+            const activeStage = cachedDpiStages[currentDpiStage - 1] || cachedDpiStages[0];
+            if (activeStage && typeof activeStage.value === 'number') {
+              lastKnownDpi = activeStage.value;
+            }
+            break;
+          }
+        }
+      }
+
+      if (fs.existsSync(devFile)) {
+        const devData = JSON.parse(fs.readFileSync(devFile, 'utf8'));
+        const instances = devData?.deviceInstances || [];
+        if (instances.length > 0 && instances[0].productId) {
+          defaultDeviceName = instances[0].productId;
+        }
+      }
     } catch (_) {}
   }
+
+  loadInitialProfileData();
 
   loadPowerConfig();
 
@@ -126,17 +176,74 @@ if (electron) {
   let activeTray = null;
   const OriginalTray = electron ? electron.Tray : null;
 
-  if (OriginalTray) {
+  function registerActiveTray(trayInstance) {
+    if (trayInstance) {
+      activeTray = trayInstance;
+      global._bgcTray = trayInstance;
+    }
+  }
+
+  global._bgcOnTrayCreated = function (trayInstance) {
+    registerActiveTray(trayInstance);
+    logDebug('Tray registered via global._bgcOnTrayCreated');
+    setTimeout(() => updateTrayBattery(), 100);
+  };
+
+  if (OriginalTray && OriginalTray.prototype) {
+    const origSetToolTip = OriginalTray.prototype.setToolTip;
+    OriginalTray.prototype.setToolTip = function (tip) {
+      registerActiveTray(this);
+      if (tip && !tip.includes('\n')) {
+        this._baseToolTip = tip;
+      }
+      const fullTip = formatTrayTooltip(this._baseToolTip || 'Better Glorious Core');
+      return origSetToolTip ? origSetToolTip.call(this, fullTip) : undefined;
+    };
+
+    const origSetContextMenu = OriginalTray.prototype.setContextMenu;
+    if (origSetContextMenu) {
+      OriginalTray.prototype.setContextMenu = function (...args) {
+        registerActiveTray(this);
+        return origSetContextMenu.apply(this, args);
+      };
+    }
+
+    const origSetTitle = OriginalTray.prototype.setTitle;
+    if (origSetTitle) {
+      OriginalTray.prototype.setTitle = function (...args) {
+        registerActiveTray(this);
+        return origSetTitle.apply(this, args);
+      };
+    }
+
     class BetterTray extends OriginalTray {
       constructor(...args) {
         super(...args);
-        activeTray = this;
-        global._bgcTray = this;
+        registerActiveTray(this);
+        this._baseToolTip = 'Better Glorious Core';
+        logDebug('BetterTray constructor invoked');
         setTimeout(() => updateTrayBattery(), 100);
+      }
+      setToolTip(tip) {
+        registerActiveTray(this);
+        if (tip && !tip.includes('\n')) {
+          this._baseToolTip = tip;
+        }
+        const fullTip = formatTrayTooltip(this._baseToolTip || 'Better Glorious Core');
+        return super.setToolTip(fullTip);
       }
     }
     Object.setPrototypeOf(BetterTray, OriginalTray);
-    if (electron) electron.Tray = BetterTray;
+    try {
+      Object.defineProperty(electron, 'Tray', {
+        configurable: true,
+        enumerable: true,
+        get: () => BetterTray,
+        set: () => {}
+      });
+    } catch (_) {
+      try { electron.Tray = BetterTray; } catch (_) {}
+    }
   }
 
   const _deviceBatteryStates = new Map();
@@ -212,19 +319,63 @@ if (electron) {
     }
 
     const hoursRemaining = Math.max(0.5, level / ratePerHour);
+    const hrs = Math.round(hoursRemaining);
     if (hoursRemaining < 1) {
       return `~${Math.round(hoursRemaining * 60)}m remaining`;
     } else if (hoursRemaining < 24) {
-      return `~${Math.round(hoursRemaining)}h remaining`;
+      return `~${hrs}h remaining`;
     } else {
       const days = (hoursRemaining / 24).toFixed(1);
-      return `~${days}d remaining`;
+      return `~${hrs}h remaining (~${days}d)`;
     }
+  }
+
+  function normalizeDeviceId(id) {
+    let raw = id;
+    if (!raw || raw === 'default' || raw === 'mouse' || raw === 'Wireless Mouse') {
+      raw = defaultDeviceName || 'Model D 2 Wireless';
+    }
+    return String(raw)
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+      .replace(/([a-zA-Z])([0-9])/g, '$1 $2')
+      .replace(/([0-9])([a-zA-Z])/g, '$1 $2')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function formatTrayTooltip(baseText = 'Better Glorious Core') {
+    let tooltipText = baseText || 'Better Glorious Core';
+    if (_deviceBatteryStates.size === 0) {
+      loadBatteryCache();
+    }
+
+    const seenNames = new Set();
+    for (const [rawId, state] of _deviceBatteryStates.entries()) {
+      const name = normalizeDeviceId(rawId);
+      if (seenNames.has(name)) continue;
+      seenNames.add(name);
+
+      const chargingIcon = state.isCharging ? ' ⚡ Charging' : '';
+      const ecoStr = state.ecoActive ? ' 🔋 [Eco]' : '';
+
+      if (state.isCharging) {
+        tooltipText += `\n${name}: ${state.level}%${chargingIcon}`;
+      } else {
+        tooltipText += `\n${name}: ${state.level}%${ecoStr}`;
+      }
+    }
+
+    if (tooltipText.length > 125) {
+      tooltipText = tooltipText.substring(0, 122) + '...';
+    }
+    return tooltipText;
   }
 
   function updateTrayBattery(deviceId, level, isCharging) {
     if (deviceId && typeof level === 'number') {
-      const existing = _deviceBatteryStates.get(deviceId) || { history: [] };
+      const normId = normalizeDeviceId(deviceId);
+      const existing = _deviceBatteryStates.get(normId) || { history: [] };
       const history = Array.isArray(existing.history) ? [...existing.history] : [];
 
       const now = Date.now();
@@ -251,34 +402,57 @@ if (electron) {
         history
       };
 
-      _deviceBatteryStates.set(deviceId, newState);
+      _deviceBatteryStates.set(normId, newState);
+
+      // Clean up any un-normalized duplicate keys
+      for (const k of Array.from(_deviceBatteryStates.keys())) {
+        if (k !== normId && normalizeDeviceId(k) === normId) {
+          _deviceBatteryStates.delete(k);
+        }
+      }
+
       saveBatteryCache();
 
+      // Broadcast update to renderer windows so in-app UI gets real-time telemetry
+      broadcastToWindows('bgc:battery-update', {
+        deviceId: normId,
+        level,
+        isCharging,
+        estimate: calculateBatteryEstimate(newState)
+      });
+
       // Check Eco Mode state transition
-      checkEcoModeTransition(deviceId, newState, existing.ecoActive);
+      checkEcoModeTransition(normId, newState, existing.ecoActive);
     }
 
     const tray = activeTray || global._bgcTray;
     if (tray && typeof tray.setToolTip === 'function') {
-      let tooltipText = 'Better Glorious Core';
-      for (const [id, state] of _deviceBatteryStates.entries()) {
-        const chargingIcon = state.isCharging ? ' ⚡ (Charging' : '';
-        const name = (id && id !== 'default') ? id : 'Wireless Mouse';
-        const estimate = calculateBatteryEstimate(state);
-        const estimateStr = estimate ? ` (${estimate})` : '';
-        const ecoStr = state.ecoActive ? ' 🔋 [Eco Mode]' : '';
-
-        if (state.isCharging) {
-          tooltipText += `\n${name}: ${state.level}%${chargingIcon}${estimateStr ? `, ${estimateStr.trim()}` : ''})`;
-        } else {
-          tooltipText += `\n${name}: ${state.level}%${estimateStr}${ecoStr}`;
-        }
-      }
       try {
-        tray.setToolTip(tooltipText);
+        const fullTip = formatTrayTooltip(tray._baseToolTip || 'Better Glorious Core');
+        logDebug(`Tray tooltip updated: "${fullTip.replace(/\n/g, ' \\n ')}" (len=${fullTip.length})`);
+        if (typeof OriginalTray?.prototype?.setToolTip === 'function') {
+          OriginalTray.prototype.setToolTip.call(tray, fullTip);
+        } else {
+          tray.setToolTip(fullTip);
+        }
       } catch (_) {}
     }
   }
+
+  // Recurring refresh to ensure live battery and time remaining estimate are always accurate
+  setInterval(() => {
+    try {
+      const tray = activeTray || global._bgcTray;
+      if (tray && typeof tray.setToolTip === 'function') {
+        const fullTip = formatTrayTooltip(tray._baseToolTip || 'Better Glorious Core');
+        if (typeof OriginalTray?.prototype?.setToolTip === 'function') {
+          OriginalTray.prototype.setToolTip.call(tray, fullTip);
+        } else {
+          tray.setToolTip(fullTip);
+        }
+      }
+    } catch (_) {}
+  }, 15000);
 
   /**
    * Handles Eco Mode transitions and notifications
@@ -417,6 +591,12 @@ if (electron) {
   let osdWindow = null;
   let osdHideTimeout = null;
   const osdHtmlPath = path.join(modDir, 'osd.html');
+  let osdHtmlContent = '';
+  try {
+    if (fs.existsSync(osdHtmlPath)) {
+      osdHtmlContent = fs.readFileSync(osdHtmlPath, 'utf8');
+    }
+  } catch (_) {}
 
   function calculateOsdPosition(posSetting = 'bottom-right', winWidth = 300, winHeight = 95) {
     try {
@@ -454,6 +634,10 @@ if (electron) {
     }
   }
 
+  let isOsdReady = false;
+  let pendingOsdData = null;
+  let isOsdInitialized = false;
+
   function createOsdWindow() {
     if (!BrowserWindow || osdWindow || !electron) return null;
 
@@ -467,6 +651,7 @@ if (electron) {
         y,
         frame: false,
         transparent: true,
+        backgroundColor: '#00000000',
         alwaysOnTop: true,
         skipTaskbar: true,
         focusable: false,
@@ -475,26 +660,48 @@ if (electron) {
         resizable: false,
         webPreferences: {
           nodeIntegration: true,
-          contextIsolation: false
+          contextIsolation: false,
+          sandbox: false
         }
       });
 
-      if (typeof osdWindow.setIgnoreMouseEvents === 'function') {
-        osdWindow.setIgnoreMouseEvents(true);
-      }
-      if (typeof osdWindow.setVisibleOnAllWorkspaces === 'function') {
-        osdWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-      }
-      if (typeof osdWindow.setAlwaysOnTop === 'function') {
-        osdWindow.setAlwaysOnTop(true, 'screen-saver');
-      }
+      try {
+        if (typeof osdWindow.setIgnoreMouseEvents === 'function') {
+          osdWindow.setIgnoreMouseEvents(true);
+        }
+      } catch (_) {}
 
-      if (fs.existsSync(osdHtmlPath)) {
+      try {
+        if (typeof osdWindow.setVisibleOnAllWorkspaces === 'function') {
+          osdWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+        }
+      } catch (_) {}
+
+      try {
+        if (typeof osdWindow.setAlwaysOnTop === 'function') {
+          osdWindow.setAlwaysOnTop(true, 'screen-saver');
+        }
+      } catch (_) {}
+
+      if (osdHtmlContent) {
+        osdWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(osdHtmlContent)}`);
+      } else if (fs.existsSync(osdHtmlPath)) {
         osdWindow.loadFile(osdHtmlPath);
       }
 
+      osdWindow.webContents.on('did-finish-load', () => {
+        isOsdReady = true;
+        logDebug('OSD window loaded and ready');
+        if (pendingOsdData) {
+          const data = pendingOsdData;
+          pendingOsdData = null;
+          showDpiOsd(data);
+        }
+      });
+
       osdWindow.on('closed', () => {
         osdWindow = null;
+        isOsdReady = false;
       });
 
       return osdWindow;
@@ -504,14 +711,32 @@ if (electron) {
     }
   }
 
+  // Preload OSD window on app ready
+  if (app && app.whenReady) {
+    app.whenReady().then(() => {
+      setTimeout(() => {
+        try {
+          if (!osdWindow && powerConfig.osdEnabled) {
+            createOsdWindow();
+          }
+        } catch (_) {}
+      }, 1000);
+    });
+  }
+
   function showDpiOsd(data) {
     if (!powerConfig.osdEnabled) return;
 
-    if (!osdWindow) {
+    logDebug(`showDpiOsd invoked: data=${JSON.stringify(data)}, isOsdReady=${isOsdReady}, hasOsdWindow=${Boolean(osdWindow)}`);
+
+    if (!osdWindow || osdWindow.isDestroyed()) {
       createOsdWindow();
     }
 
-    if (!osdWindow || !osdWindow.webContents) return;
+    if (!isOsdReady || !osdWindow || !osdWindow.webContents || osdWindow.isDestroyed()) {
+      pendingOsdData = data;
+      return;
+    }
 
     try {
       if (osdHideTimeout) {
@@ -520,26 +745,53 @@ if (electron) {
       }
 
       const { x, y } = calculateOsdPosition(powerConfig.osdPosition);
-      osdWindow.setPosition(x, y);
+      try {
+        osdWindow.setPosition(x, y);
+      } catch (_) {}
 
-      osdWindow.webContents.send('bgc:osd-dpi', data);
-
-      if (typeof osdWindow.showInactive === 'function') {
-        osdWindow.showInactive();
-      } else {
-        osdWindow.show();
+      const payloadJson = JSON.stringify(data);
+      if (osdWindow.webContents && !osdWindow.webContents.isDestroyed()) {
+        osdWindow.webContents.executeJavaScript(`
+          if (typeof window.updateDpi === 'function') {
+            window.updateDpi(${payloadJson});
+          }
+        `).catch(() => {});
+        try {
+          osdWindow.webContents.send('bgc:osd-dpi', data);
+        } catch (_) {}
       }
+
+      try {
+        osdWindow.setAlwaysOnTop(true, 'screen-saver');
+        osdWindow.moveTop();
+        if (typeof osdWindow.showInactive === 'function') {
+          osdWindow.showInactive();
+        } else {
+          osdWindow.show();
+        }
+      } catch (_) {}
 
       const duration = Number(powerConfig.osdDurationMs) || 1500;
       osdHideTimeout = setTimeout(() => {
         try {
-          if (osdWindow && osdWindow.webContents && !osdWindow.isDestroyed()) {
-            osdWindow.webContents.send('bgc:osd-hide');
+          if (osdWindow && !osdWindow.isDestroyed()) {
+            if (osdWindow.webContents && !osdWindow.webContents.isDestroyed()) {
+              osdWindow.webContents.executeJavaScript(`
+                if (typeof window.hideDpi === 'function') {
+                  window.hideDpi();
+                }
+              `).catch(() => {});
+              try {
+                osdWindow.webContents.send('bgc:osd-hide');
+              } catch (_) {}
+            }
             setTimeout(() => {
-              if (osdWindow && !osdWindow.isDestroyed()) {
-                osdWindow.hide();
-              }
-            }, 200);
+              try {
+                if (osdWindow && !osdWindow.isDestroyed()) {
+                  osdWindow.hide();
+                }
+              } catch (_) {}
+            }, 250);
           }
         } catch (_) {}
       }, duration);
@@ -548,15 +800,219 @@ if (electron) {
     }
   }
 
+  let lastDpiClickTime = 0;
+  function triggerDpiCycle(direction = 'up', explicitStage = null, devName = null) {
+    const now = Date.now();
+    if (explicitStage === null && now - lastDpiClickTime < 180) {
+      return; // Debounce hardware switch chatter
+    }
+    lastDpiClickTime = now;
+
+    if (typeof explicitStage === 'number') {
+      currentDpiStage = Math.max(1, Math.min(totalDpiStages || 4, explicitStage));
+    } else if (direction === 'down') {
+      currentDpiStage = currentDpiStage <= 1 ? (totalDpiStages || 4) : currentDpiStage - 1;
+    } else {
+      currentDpiStage = (currentDpiStage % (totalDpiStages || 4)) + 1;
+    }
+
+    let activeColor;
+    let activeDpi = lastKnownDpi;
+    if (Array.isArray(cachedDpiStages) && cachedDpiStages.length >= currentDpiStage) {
+      const stageObj = cachedDpiStages[currentDpiStage - 1];
+      if (stageObj) {
+        activeDpi = stageObj.value || lastKnownDpi;
+        activeColor = stageObj.color ? (stageObj.color.startsWith('#') ? stageObj.color : '#' + stageObj.color) : undefined;
+      }
+    }
+
+    logDebug(`triggerDpiCycle: stage=${currentDpiStage}, dpi=${activeDpi}, dir=${direction}`);
+    showDpiOsd({
+      dpi: activeDpi,
+      stageIndex: currentDpiStage,
+      totalStages: totalDpiStages || 4,
+      color: activeColor,
+      deviceName: devName || defaultDeviceName || 'Model D 2 Wireless'
+    });
+  }
+
+  // Exposed for direct invocation by Glorious Core handlers or patches
+  global._bgcOnDpiButtonPress = function (buttonId, device) {
+    logDebug(`_bgcOnDpiButtonPress received: buttonId=${buttonId}`);
+    const devName = device?.supportedDeviceData?.name || device?.rendererState?.deviceName || defaultDeviceName;
+    if (buttonId === 6) {
+      triggerDpiCycle('down', null, devName);
+    } else {
+      triggerDpiCycle('up', null, devName);
+    }
+  };
+
   // Register global DPI telemetry event listener
   global._bgcOnDpiUpdate = function (data) {
+    if (data && typeof data.stageIndex === 'number') {
+      currentDpiStage = data.stageIndex;
+    }
+    if (data && typeof data.dpi === 'number') {
+      lastKnownDpi = data.dpi;
+    }
     showDpiOsd(data);
+  };
+
+  // Intercept EventManager.emit from Glorious Core for battery and DPI updates
+  global._bgcOnEventManagerEmit = function (eventName, ...args) {
+    try {
+      // Find payload object flexibly
+      let payload = null;
+      for (const arg of [eventName, ...args]) {
+        if (arg && typeof arg === 'object') {
+          if (arg.hardwareStatus || arg.currentProfileData || arg.mousePerformanceState || typeof arg.batteryLevel === 'number') {
+            payload = arg;
+            break;
+          }
+        }
+      }
+      if (!payload) {
+        payload = args[1] || args[0] || eventName;
+      }
+
+      // 1. Hardware Status (Battery Level & Charging State)
+      const hw = (payload && payload.hardwareStatus) ? payload.hardwareStatus : (payload && typeof payload.batteryLevel === 'number' ? payload : null);
+      if (hw && typeof hw.batteryLevel === 'number') {
+        const name = payload.deviceName || payload.productName || payload.name || payload.productId || 'Wireless Mouse';
+        const isCharging = Boolean(hw.isCharging);
+        updateTrayBattery(name, hw.batteryLevel, isCharging);
+        checkLowBatteryNotification(name, hw.batteryLevel, isCharging);
+      }
+
+      // 2. Mouse Performance & DPI Changes
+      const perf = payload?.currentProfileData?.mousePerformanceState || payload?.mousePerformanceState || (Array.isArray(payload?.DpiStage) ? payload : null);
+      if (perf && Array.isArray(perf.DpiStage) && perf.DpiStage.length > 0) {
+        cachedDpiStages = perf.DpiStage;
+        totalDpiStages = perf.DpiStage.length;
+        const stageIdx = typeof perf.dpiSelectIndex === 'number' ? perf.dpiSelectIndex : 0;
+        const stageObj = perf.DpiStage[stageIdx] || perf.DpiStage[0];
+
+        if (stageObj) {
+          const newStage = stageIdx + 1;
+          const newDpi = stageObj.value;
+          const hasChanged = (currentDpiStage !== newStage || lastKnownDpi !== newDpi);
+          currentDpiStage = newStage;
+          lastKnownDpi = newDpi;
+
+          if (hasChanged && isOsdInitialized) {
+            showDpiOsd({
+              dpi: newDpi,
+              stageIndex: newStage,
+              totalStages: totalDpiStages,
+              color: stageObj.color ? (stageObj.color.startsWith('#') ? stageObj.color : '#' + stageObj.color) : undefined,
+              profileName: payload?.currentProfileData?.name || 'Profile',
+              deviceName: payload?.productId || payload?.name || 'Wireless Mouse'
+            });
+          }
+          isOsdInitialized = true;
+        }
+      }
+    } catch (err) {
+      console.error('[Better Glorious Core] EventManager emit hook error:', err);
+    }
+  };
+
+  // Intercept raw HID data packets from #deviceDataCallback
+  global._bgcOnDeviceData = function (data, deviceInfo) {
+    try {
+      if (!data || data.length < 2) return;
+
+      const b0 = data[0];
+      const b1 = data[1];
+
+      // Battery Packet (e.g. [6, 251, level, isCharging] or stripped [251, level, isCharging])
+      if ((b0 === 6 && b1 === 251) || b0 === 251) {
+        const offset = b0 === 6 ? 2 : 1;
+        const level = data[offset];
+        if (typeof level === 'number' && level >= 0 && level <= 100) {
+          const isCharging = Boolean(data[offset + 1]);
+          const devName = deviceInfo?.name || deviceInfo?.productId || 'Wireless Mouse';
+          updateTrayBattery(devName, level, isCharging);
+        }
+        return;
+      }
+
+      // Explicit DPI Stage Packet (e.g. [3, 2, stageIndex] or stripped [2, stageIndex])
+      if ((b0 === 3 && b1 === 2 && typeof data[2] === 'number') || (b0 === 2 && typeof b1 === 'number' && b1 >= 0 && b1 <= 10)) {
+        const stageIdx = (b0 === 3 ? data[2] : b1);
+        const stage = stageIdx + 1;
+        triggerDpiCycle('set', stage, deviceInfo?.name || defaultDeviceName);
+        return;
+      }
+
+      // Physical Mouse Button Click Packet (Report 6, Command 249/247/248 or Report 4/7 or stripped)
+      const isButtonReport = (
+        (b0 === 6 && (b1 === 249 || b1 === 247 || b1 === 248)) ||
+        (b0 === 4 && (b1 === 249 || b1 === 247 || b1 === 248)) ||
+        (b0 === 7 && b1 === 83) ||
+        (b0 === 249 || b0 === 247 || b0 === 248)
+      );
+
+      if (isButtonReport) {
+        const b2 = data[2];
+        const b3 = data[3];
+        // Button IDs from Glorious DeviceButtonMapping: 5 = DPICycleUp, 6 = DPICycleDown, 8 = DPIShift
+        const isDpiUp = (b3 === 5 || b2 === 5 || (b0 === 249 && (b1 === 5 || b2 === 5)));
+        const isDpiDown = (b3 === 6 || b2 === 6 || (b0 === 249 && (b1 === 6 || b2 === 6)));
+        const isDpiShift = (b3 === 8 || b2 === 8 || b3 === 20 || b2 === 20);
+
+        if (isDpiUp || isDpiDown || isDpiShift) {
+          const devName = deviceInfo?.name || defaultDeviceName || 'Model D 2 Wireless';
+          if (isDpiDown) {
+            triggerDpiCycle('down', null, devName);
+          } else {
+            triggerDpiCycle('up', null, devName);
+          }
+        }
+      }
+    } catch (_) {}
   };
 
   // -------------------------------------------------------------
   // IPC Handlers for Power Management Settings & Stats
   // -------------------------------------------------------------
   if (ipcMain && ipcMain.handle) {
+    const originalHandle = ipcMain.handle.bind(ipcMain);
+    ipcMain.handle = function (channel, handler) {
+      const chUpper = typeof channel === 'string' ? channel.toUpperCase() : '';
+      if (chUpper.includes('MOUSEPERFORMANCE') || chUpper.includes('PROPERTYUPDATE')) {
+        const wrappedHandler = async function (event, ...args) {
+          try {
+            const data = args[0];
+            const perf = data?.mousePerformanceState || data?.currentProfileData?.mousePerformanceState;
+            if (perf && typeof perf.dpiSelectIndex === 'number') {
+              const newStage = perf.dpiSelectIndex + 1;
+              if (Array.isArray(perf.DpiStage)) {
+                cachedDpiStages = perf.DpiStage;
+                totalDpiStages = perf.DpiStage.length;
+              }
+              const stageObj = cachedDpiStages[newStage - 1];
+              if (stageObj) {
+                currentDpiStage = newStage;
+                lastKnownDpi = stageObj.value;
+                logDebug(`IPC DPI change: stage=${newStage}, dpi=${stageObj.value}`);
+                showDpiOsd({
+                  dpi: stageObj.value,
+                  stageIndex: newStage,
+                  totalStages: totalDpiStages,
+                  color: stageObj.color ? (stageObj.color.startsWith('#') ? stageObj.color : '#' + stageObj.color) : undefined,
+                  deviceName: defaultDeviceName || 'Model D 2 Wireless'
+                });
+              }
+            }
+          } catch (_) {}
+          return handler(event, ...args);
+        };
+        return originalHandle(channel, wrappedHandler);
+      }
+      return originalHandle(channel, handler);
+    };
+
     ipcMain.handle('bgc:get-power-config', () => powerConfig);
     ipcMain.handle('bgc:set-power-config', (event, newConfig) => {
       if (typeof newConfig === 'object' && newConfig !== null) {
@@ -635,7 +1091,9 @@ module.exports = {
   DEFAULT_POWER_CONFIG: typeof DEFAULT_POWER_CONFIG !== 'undefined' ? DEFAULT_POWER_CONFIG : null,
   calculateBatteryEstimate: typeof calculateBatteryEstimate !== 'undefined' ? calculateBatteryEstimate : null,
   calculateOsdPosition: typeof calculateOsdPosition !== 'undefined' ? calculateOsdPosition : null,
-  showDpiOsd: typeof showDpiOsd !== 'undefined' ? showDpiOsd : null
+  showDpiOsd: typeof showDpiOsd !== 'undefined' ? showDpiOsd : null,
+  formatTrayTooltip: typeof formatTrayTooltip !== 'undefined' ? formatTrayTooltip : null,
+  normalizeDeviceId: typeof normalizeDeviceId !== 'undefined' ? normalizeDeviceId : null
 };
 
 

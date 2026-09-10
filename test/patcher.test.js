@@ -70,7 +70,7 @@ async function runTests() {
 
     // Check Battery Patch Main Process modifications
     assert(patchedMain.includes('padStart(4, "0")'), 'Main file should normalize VID/PID with padStart');
-    assert(patchedMain.includes('parseInt(methodData.vid, 16) === rawVid'), 'Main file should include integer comparison in knownDevices');
+    assert(patchedMain.includes('parseInt(String(methodData.vid).replace'), 'Main file should include integer comparison in knownDevices');
     assert(patchedMain.includes('((data[0] === 6 && data[1] === 251) || data[0] === 251)'), 'Main file should support stripped Report ID 251');
     assert(patchedMain.includes('_bgcParseBattery'), 'Main file should include 255 charging sentinel helper');
     assert(patchedMain.includes('_bgcOnBatteryUpdate'), 'Main file should dispatch _bgcOnBatteryUpdate event for tray and notifications');
@@ -91,6 +91,7 @@ async function runTests() {
     const patchedRendererJs = fs.readFileSync(path.join(tempExtractDir, 'out', 'renderer-process', 'assets', 'index-sample.js'), 'utf8');
     assert(patchedRendererJs.includes('showValue: true'), 'Renderer bundle should have showValue: true');
     assert(patchedRendererJs.includes('bgc_bat_'), 'Renderer bundle should include persistent battery cache');
+    assert(patchedRendererJs.includes('_bgcFormatBattery'), 'Renderer bundle should include _bgcFormatBattery');
 
     // Check renderer HTML modifications
     const patchedHtml = fs.readFileSync(path.join(tempExtractDir, 'out', 'renderer-process', 'index.html'), 'utf8');
@@ -210,6 +211,12 @@ async function runTests() {
     // Test discharging estimate fallback
     const dischargingFallback = mainHook.calculateBatteryEstimate({ level: 80, isCharging: false });
     assert(dischargingFallback.includes('remaining'), 'Discharge fallback estimate should calculate remaining time');
+
+    // Test tray tooltip does not contain remaining hours
+    if (typeof mainHook.formatTrayTooltip === 'function') {
+      const tip = mainHook.formatTrayTooltip('Better Glorious Core');
+      assert(!tip.includes('remaining'), 'Tray tooltip should not include remaining hours');
+    }
   }
 
   // Test OSD / DPI Overlay configuration & position calculations

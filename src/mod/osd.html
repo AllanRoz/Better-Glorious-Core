@@ -223,16 +223,14 @@
 
     // Connect to Electron IPC if available
     try {
-      if (window.require) {
-        const electron = window.require('electron');
-        if (electron && electron.ipcRenderer) {
-          electron.ipcRenderer.on('bgc:osd-dpi', (event, data) => {
-            updateDpi(data);
-          });
-          electron.ipcRenderer.on('bgc:osd-hide', () => {
-            hideDpi();
-          });
-        }
+      const electron = (typeof require !== 'undefined' ? require('electron') : (window.require ? window.require('electron') : null));
+      if (electron && electron.ipcRenderer) {
+        electron.ipcRenderer.on('bgc:osd-dpi', (event, data) => {
+          updateDpi(data);
+        });
+        electron.ipcRenderer.on('bgc:osd-hide', () => {
+          hideDpi();
+        });
       }
     } catch (_) {}
 

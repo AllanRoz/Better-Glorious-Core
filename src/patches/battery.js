@@ -90,6 +90,38 @@ function patchRendererBatteryPill(extractedDir) {
       );
     }
 
+    // Pattern 6: Battery value formatter next to battery icon in renderer UI (e.g. 99% (~62h))
+    // Matches: children: isNaN(value2) ? void 0 : `${value2}%`
+    const batteryFormatPattern = /children:\s*isNaN\(([a-zA-Z0-9_$]+)\)\s*\?\s*void 0\s*:\s*(?:`\$\{\1\}%`|\1\s*\+\s*"%")/g;
+    if (batteryFormatPattern.test(content)) {
+      if (!content.includes('/* Better Glorious Core - Battery Formatter */')) {
+        const formatterFn = `/* Better Glorious Core - Battery Formatter */
+function _bgcFormatBattery(val, isChg) {
+  try {
+    if (typeof window !== "undefined" && typeof window._bgcFormatBattery === "function") {
+      var custom = window._bgcFormatBattery(val, isChg);
+      if (custom != null) return custom;
+    }
+  } catch(_) {}
+  if (val == null || isNaN(val)) return void 0;
+  var n = Number(val);
+  if (isChg) return n >= 100 ? "100%" : n + "% (Charging)";
+  var r = 1.6;
+  try {
+    if (window._bgcDischargeRate && window._bgcDischargeRate > 0.5) r = window._bgcDischargeRate;
+  } catch(_) {}
+  var h = Math.max(1, Math.round(n / r));
+  return n + "% (~" + h + "h)";
+};
+`;
+        content = formatterFn + content;
+      }
+      content = content.replace(
+        batteryFormatPattern,
+        'children: (typeof _bgcFormatBattery === "function" ? _bgcFormatBattery($1, typeof isCharging !== "undefined" ? isCharging : false) : (isNaN($1) ? void 0 : $1 + "%"))'
+      );
+    }
+
     if (content !== original) {
       fs.writeFileSync(file, content, 'utf8');
       patched = true;
@@ -169,16 +201,95 @@ const pid = \`0x\${rawPid.toString(16).toLowerCase().padStart(4, "0")}\`;`;
   }
 
   // Target A.2: Update knownDevices.find lookup
-  // Stock: methodData.vid.toLowerCase() === vid && methodData.pid.toLowerCase() === pid
-  const knownDevicesPattern = /methodData\.vid\.toLowerCase\(\)\s*===?\s*vid\s*&&\s*methodData\.pid\.toLowerCase\(\)\s*===?\s*pid/;
-  const knownDevicesReplacement = `((typeof rawVid !== 'undefined' && parseInt(methodData.vid, 16) === rawVid && parseInt(methodData.pid, 16) === rawPid) || (methodData.vid.toLowerCase() === vid && methodData.pid.toLowerCase() === pid))`;
+  // Fix unpadded hex comparison and vendor 'z0x' prefix (e.g. z0x093A)
+  const knownDevicesPattern = /methodData\.vid\.toLowerCase\(\)\s*===?\s*vid\s*&&\s*methodData\.pid\.toLowerCase\(\)\s*===?\s*pid/g;
+  const knownDevicesReplacement = `((typeof rawVid !== 'undefined' && parseInt(String(methodData.vid).replace(/^z/i, ''), 16) === rawVid && parseInt(String(methodData.pid).replace(/^z/i, ''), 16) === rawPid) || (typeof deviceInfo !== 'undefined' && parseInt(String(methodData.vid).replace(/^z/i, ''), 16) === deviceInfo.vid && parseInt(String(methodData.pid).replace(/^z/i, ''), 16) === deviceInfo.pid) || (String(methodData.vid).replace(/^z/i, '').toLowerCase() === vid.toLowerCase() && String(methodData.pid).replace(/^z/i, '').toLowerCase() === pid.toLowerCase()))`;
 
   if (knownDevicesPattern.test(content)) {
     content = content.replace(knownDevicesPattern, knownDevicesReplacement);
-    statusLogs.push('Updated knownDevices lookup loop with integer & padded hex checks');
-  } else if (!content.includes('parseInt(methodData.vid, 16) === rawVid')) {
-    // If not found, check if it's already patched or log notice
+    statusLogs.push('Updated knownDevices lookup loop with integer & stripped z0x hex checks');
+  } else if (!content.includes('parseInt(String(methodData.vid).replace')) {
     statusLogs.push('Notice: knownDevices lookup matching pattern not found or already updated.');
+  }
+
+  // Target A.3: Hook raw HID #deviceDataCallback
+  const deviceCallbackPattern = /(static\s+async\s+#deviceDataCallback\s*\(\s*data\s*,\s*deviceInfo\s*\)\s*\{)/g;
+  if (deviceCallbackPattern.test(content)) {
+    content = content.replace(
+      deviceCallbackPattern,
+      '$1 try { if (typeof global._bgcOnDeviceData === "function") { global._bgcOnDeviceData(data, deviceInfo); } } catch (_) {}'
+    );
+    statusLogs.push('Hooked raw HID deviceDataCallback for live mouse input tracking');
+  }
+
+  // Target A.4: Hook EventManager.emit for real-time status and DPI telemetry
+  const eventManagerPattern = /class\s+EventManager\s*\{\s*static\s+emit\s*\(\s*eventName\s*,\s*\.\.\.args\s*\)\s*\{/g;
+  if (eventManagerPattern.test(content)) {
+    content = content.replace(
+      eventManagerPattern,
+      'class EventManager { static emit(eventName, ...args) { try { if (typeof global._bgcOnEventManagerEmit === "function") { global._bgcOnEventManagerEmit(eventName, ...args); } } catch (_) {} '
+    );
+    statusLogs.push('Hooked EventManager.emit for real-time hardware status, battery, and DPI tracking');
+  }
+
+  // Target A.5: Hook hardwareStatus.batteryLevel assignments in updateBatteryStats
+  const hwBatteryPattern = /(device\.rendererState\.hardwareStatus\.batteryLevel\s*=\s*)([^;]+);/g;
+  if (hwBatteryPattern.test(content)) {
+    content = content.replace(
+      hwBatteryPattern,
+      '$1$2; try { if (typeof global._bgcOnBatteryUpdate === "function") { global._bgcOnBatteryUpdate(device?.rendererState?.deviceName || device?.supportedDeviceData?.name || "Wireless Mouse", $2, device.rendererState.hardwareStatus.isCharging); } } catch (_) {}'
+    );
+    statusLogs.push('Hooked hardwareStatus.batteryLevel setter in main process');
+  }
+
+  // Target A.6: Hook MouseV2 button reports for DPI HUD cycling
+  const mouseV2BtnPattern = /else\s+if\s*\(\s*data\[0\]\s*==\s*6\s*&&\s*data\[1\]\s*==\s*249\s*&&\s*data\[2\]\s*>=\s*128\s*\)\s*\{/g;
+  if (mouseV2BtnPattern.test(content)) {
+    content = content.replace(
+      mouseV2BtnPattern,
+      `else if (((data[0] == 6 && (data[1] == 249 || data[1] == 247)) || data[0] == 249 || data[0] == 247)) {
+        try {
+          const _btnId = data[0] == 6 ? data[3] : data[2];
+          if (typeof global._bgcOnDpiButtonPress === 'function' && (_btnId == 5 || _btnId == 6 || _btnId == 8 || data[3] == 5 || data[2] == 5)) {
+            global._bgcOnDpiButtonPress(_btnId, device);
+          }
+        } catch (_) {}`
+    );
+    statusLogs.push('Hooked MouseV2 button handler for physical DPI button cycling');
+  }
+
+  // Target A.7: Hook installTray to register global._bgcTray immediately
+  const installTrayPattern = /(TrayIcon\s*=\s*new\s+electron\.Tray\([^)]+\);)/g;
+  if (installTrayPattern.test(content)) {
+    content = content.replace(
+      installTrayPattern,
+      `$1 try { global._bgcTray = TrayIcon; if (typeof global._bgcOnTrayCreated === 'function') { global._bgcOnTrayCreated(TrayIcon); } } catch (_) {}`
+    );
+    statusLogs.push('Hooked installTray to register global._bgcTray immediately upon creation');
+  }
+
+  // Target A.8: Hook setPerformance to trigger DPI OSD on UI / software DPI changes
+  const setPerfPattern = /(static\s+async\s+setPerformance\s*\(\s*deviceState\s*,\s*mousePerformanceState\s*\)\s*\{)/g;
+  if (setPerfPattern.test(content)) {
+    content = content.replace(
+      setPerfPattern,
+      `$1 try {
+        if (typeof global._bgcOnDpiUpdate === 'function' && mousePerformanceState) {
+          const _idx = typeof mousePerformanceState.dpiSelectIndex === 'number' ? mousePerformanceState.dpiSelectIndex : 0;
+          const _stg = mousePerformanceState.DpiStage?.[_idx];
+          if (_stg) {
+            global._bgcOnDpiUpdate({
+              dpi: _stg.value,
+              stageIndex: _idx + 1,
+              totalStages: mousePerformanceState.DpiStage?.length || 4,
+              color: _stg.color,
+              deviceName: deviceState?.deviceName
+            });
+          }
+        }
+      } catch (_) {}`
+    );
+    statusLogs.push('Hooked setPerformance to trigger live DPI OSD on UI changes');
   }
 
   // -------------------------------------------------------------
@@ -267,15 +378,40 @@ function _bgcParseBattery(deviceId, rawValue, currentChargingState) {
   }
 
   // -------------------------------------------------------------
-  // Part C: Instant Battery Query on Device Connect (0ms delay)
+  // Part C: Instant Battery Query on Device Connect & Periodic Polling
   // -------------------------------------------------------------
+  // Legacy v1 mice
   const startIntervalPattern = /(const\s+startBatteryStatsInterval\s*=\s*\(([a-zA-Z0-9_$]+),\s*([a-zA-Z0-9_$]+)[^)]*\)\s*=>\s*\{[\s\S]*?if\s*\(batteryStatsInterval\)\s*\{\s*clearInterval\(batteryStatsInterval\);\s*\})/g;
   if (startIntervalPattern.test(content)) {
     content = content.replace(
       startIntervalPattern,
       '$1\n        global._bgcRequestBatteryStats = () => { try { this.requestBatteryStatsAndUpdateIfSuccessful($2).catch(() => {}); } catch (_) {} };\n        try { this.requestBatteryStatsAndUpdateIfSuccessful($2).catch(() => {}); } catch (_) {}'
     );
-    statusLogs.push('Injected immediate HID battery query on device connection & registered wake refresh callback');
+    statusLogs.push('Injected immediate HID battery query on device connection & registered wake refresh callback (Legacy)');
+  }
+
+  // MouseV2 & MouseV2Pro (Model D 2 Wireless, Model O 2 Wireless, Model I 2 Wireless, Model D 2 Pro, Model O 2 Pro)
+  const mouseV2InitPattern = /(class\s+MouseV2(?:Pro)?DeviceHandler\s+extends\s+MouseDeviceHandler\s*\{[\s\S]*?static\s+async\s+init\s*\(\s*device[^{]*\{[\s\S]*?HID\.initializeDevice\([^)]*\);[\s\S]*?\}\s*)/g;
+  if (mouseV2InitPattern.test(content)) {
+    content = content.replace(
+      mouseV2InitPattern,
+      `$1
+    try {
+      const _bgcPoll = () => {
+        try {
+          if (device && typeof this.getBatteryStats === 'function') {
+            this.getBatteryStats(device).catch(() => {});
+          }
+        } catch (_) {}
+      };
+      setTimeout(_bgcPoll, 200);
+      setTimeout(_bgcPoll, 1200);
+      setInterval(_bgcPoll, 30000);
+      global._bgcRequestBatteryStats = _bgcPoll;
+    } catch (_) {}
+`
+    );
+    statusLogs.push('Injected startup & periodic HID battery polling into MouseV2 and MouseV2Pro device handlers');
   }
 
   if (content !== original) {
