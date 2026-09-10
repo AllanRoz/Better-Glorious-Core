@@ -76,6 +76,13 @@ async function runTests() {
     assert(patchedMain.includes('_bgcOnBatteryUpdate'), 'Main file should dispatch _bgcOnBatteryUpdate event for tray and notifications');
     assert(patchedMain.includes('this.requestBatteryStatsAndUpdateIfSuccessful(device2).catch'), 'Main file should inject immediate battery query on startup');
     assert(patchedMain.includes('global._bgcRequestBatteryStats'), 'Main file should register wake refresh callback');
+    assert(patchedMain.includes('global._bgcOnDpiButtonPress(_btnId, device, this)'), 'Main file should hook MouseV2 button reports with device and handler');
+    assert(patchedMain.includes('global._bgcOnDpiUpdate'), 'Main file should hook setPerformance for DPI OSD');
+    assert(patchedMain.includes('4,\n  1'), 'Main file should route DPI button to host notification 4, 1 in DEFAULT_KEY_BUFFER');
+    assert(patchedMain.includes('dataBuffer[dataOffset] = 4;'), 'Main file should route DPI cycle to host in PrepareKeybindingBuffers');
+    assert(patchedMain.includes('dataBuffer[hidButtonId * 4 + 0 + layerOffset] = 4;'), 'Main file should route DPI cycle to host in setBufferValueFromBinding');
+    assert(patchedMain.includes('specificDeviceHandler?.updateAllKeyBinding'), 'Main file should auto-sync keybindings on device connect');
+    assert(patchedMain.includes('global._bgcDeviceClass = Device;'), 'Main file should expose Device class for hardware sync');
 
     // Check Telemetry Blocker Patch modifications
     assert(patchedMain.includes('enabled:false,'), 'Main file should disable Sentry initialization');

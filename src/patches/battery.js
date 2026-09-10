@@ -251,7 +251,7 @@ const pid = \`0x\${rawPid.toString(16).toLowerCase().padStart(4, "0")}\`;`;
         try {
           const _btnId = data[0] == 6 ? data[3] : data[2];
           if (typeof global._bgcOnDpiButtonPress === 'function' && (_btnId == 5 || _btnId == 6 || _btnId == 8 || data[3] == 5 || data[2] == 5)) {
-            global._bgcOnDpiButtonPress(_btnId, device);
+            global._bgcOnDpiButtonPress(_btnId, device, this);
           }
         } catch (_) {}`
     );
@@ -290,6 +290,84 @@ const pid = \`0x\${rawPid.toString(16).toLowerCase().padStart(4, "0")}\`;`;
       } catch (_) {}`
     );
     statusLogs.push('Hooked setPerformance to trigger live DPI OSD on UI changes');
+  }
+
+  // Target A.9: Route DPI buttons to host notification in default and explicit keybuffers
+  // Default keybuffers: change button 5 from internal 102 to host notification 4, 1
+  const defaultKeyBufPattern = /(1,\s*5,\s*0,\s*0,\s*)102,\s*3(,\s*0,\s*0)/g;
+  if (defaultKeyBufPattern.test(content)) {
+    content = content.replace(defaultKeyBufPattern, '$14,\n  1$2');
+    statusLogs.push('Replaced silent internal DPI button byte (102) with host notification (4, 1) in DEFAULT_KEY_BUFFER');
+  }
+
+  // Explicit binding: PrepareKeybindingBuffers and PrepareKeybindingBuffers2
+  const p1Pattern = /(if\s*\(\s*isDPI\s*\)\s*\{\s*)(dataBuffer\[dataOffset\]\s*=\s*102;)(\s*\}\s*else\s*\{)/g;
+  if (p1Pattern.test(content)) {
+    content = content.replace(
+      p1Pattern,
+      `if (isDPI) {
+        if (target.functionIdentifier !== MouseFunctionType.DPIShift) {
+          dataBuffer[dataOffset] = 4;
+          dataBuffer[dataOffset + 1] = 1;
+        } else {
+          dataBuffer[dataOffset] = 102;
+        }
+      } else {`
+    );
+    statusLogs.push('Patched PrepareKeybindingBuffers to route DPI cycle buttons to host notification (4, 1)');
+  }
+
+  // Explicit binding: setBufferValueFromBinding and setBufferValueFromBinding$1
+  const p2Pattern = /(if\s*\(\s*isDPI\s*\)\s*\{\s*)(dataBuffer\[hidButtonId\s*\*\s*4\s*\+\s*0\s*\+\s*layerOffset\]\s*=\s*102;)(\s*\}\s*else\s*\{)/g;
+  if (p2Pattern.test(content)) {
+    content = content.replace(
+      p2Pattern,
+      `if (isDPI) {
+        if (boundData.target.functionIdentifier !== MouseFunctionType.DPIShift) {
+          dataBuffer[hidButtonId * 4 + 0 + layerOffset] = 4;
+          dataBuffer[hidButtonId * 4 + 1 + layerOffset] = 1;
+        } else {
+          dataBuffer[hidButtonId * 4 + 0 + layerOffset] = 102;
+        }
+      } else {`
+    );
+    statusLogs.push('Patched setBufferValueFromBinding to route DPI cycle buttons to host notification (4, 1)');
+  }
+
+  // Target A.10: Auto-push keybindings on device connect to program mouse onboard flash
+  const devInitPattern = /(Device\.gloriousDevices\.push\(device\);)/g;
+  if (devInitPattern.test(content)) {
+    content = content.replace(
+      devInitPattern,
+      `$1
+    try { global._bgcDeviceClass = Device; } catch (_) {}
+    try {
+      if (device && (device?.supportedDeviceData?.category === 'Mouse' || device?.supportedDeviceData?.category === DeviceCategory.Mouse) && typeof specificDeviceHandler?.updateAllKeyBinding === 'function') {
+        setTimeout(async () => {
+          try {
+            const _p = device.rendererState?.currentProfileData;
+            if (_p) {
+              const _layers = _p.layers || {};
+              const _keyStates = [
+                _layers[0]?.keybindingData || new DeviceKeybindingState(),
+                _layers[1]?.keybindingData || new DeviceKeybindingState(),
+                _layers[2]?.keybindingData || new DeviceKeybindingState()
+              ];
+              await specificDeviceHandler.updateAllKeyBinding(device.rendererState, _keyStates);
+              if (typeof global._bgcLog === 'function') {
+                global._bgcLog('Auto-synced mouse keybindings for DPI HUD reporting');
+              }
+            }
+          } catch (err) {
+            if (typeof global._bgcLog === 'function') {
+              global._bgcLog('Auto-sync keybindings error: ' + (err?.message || err));
+            }
+          }
+        }, 1200);
+      }
+    } catch (_) {}`
+    );
+    statusLogs.push('Hooked Device.init to automatically sync keybindings to mouse onboard flash');
   }
 
   // -------------------------------------------------------------

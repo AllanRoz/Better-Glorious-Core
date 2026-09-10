@@ -94,6 +94,7 @@ if (electron) {
       fs.appendFileSync(DEBUG_LOG_FILE, `[${new Date().toISOString()}] ${msg}\n`, 'utf8');
     } catch (_) {}
   }
+  global._bgcLog = logDebug;
   logDebug('Better Glorious Core main process hook initialized.');
 
   const DEFAULT_POWER_CONFIG = {
@@ -800,10 +801,56 @@ if (electron) {
     }
   }
 
+  function getActiveMouseAndHandler() {
+    try {
+      const devClass = global._bgcDeviceClass;
+      if (devClass && Array.isArray(devClass.gloriousDevices)) {
+        const mouse = devClass.gloriousDevices.find(d => 
+          d?.supportedDeviceData?.category === 'Mouse' || 
+          d?.supportedDeviceData?.category === 'mouse' ||
+          d?.rendererState?.productId?.toLowerCase().includes('model')
+        );
+        if (mouse) {
+          const handler = (typeof devClass.getDeviceHandler === 'function')
+            ? devClass.getDeviceHandler(mouse.supportedDeviceData?.productId)
+            : null;
+          return { device: mouse, handler };
+        }
+      }
+    } catch (_) {}
+    return { device: null, handler: null };
+  }
+
+  let isApplyingDpi = false;
+  let pendingDpiPerf = null;
+
+  async function applyHardwareDpi(handler, device, perfState) {
+    if (!handler || typeof handler.setPerformance !== 'function' || !device) return;
+    if (isApplyingDpi) {
+      pendingDpiPerf = { handler, device, perfState };
+      return;
+    }
+    isApplyingDpi = true;
+    try {
+      logDebug(`Applying hardware DPI via setPerformance: stageIndex=${perfState.dpiSelectIndex + 1}`);
+      await handler.setPerformance(device.rendererState, perfState);
+      logDebug(`Hardware DPI setPerformance completed successfully`);
+    } catch (err) {
+      logDebug(`handler.setPerformance error: ${err?.message || err}`);
+    } finally {
+      isApplyingDpi = false;
+      if (pendingDpiPerf) {
+        const next = pendingDpiPerf;
+        pendingDpiPerf = null;
+        applyHardwareDpi(next.handler, next.device, next.perfState);
+      }
+    }
+  }
+
   let lastDpiClickTime = 0;
   function triggerDpiCycle(direction = 'up', explicitStage = null, devName = null) {
     const now = Date.now();
-    if (explicitStage === null && now - lastDpiClickTime < 180) {
+    if (explicitStage === null && now - lastDpiClickTime < 150) {
       return; // Debounce hardware switch chatter
     }
     lastDpiClickTime = now;
@@ -834,16 +881,85 @@ if (electron) {
       color: activeColor,
       deviceName: devName || defaultDeviceName || 'Model D 2 Wireless'
     });
+
+    const { device: activeDev, handler: activeHandler } = getActiveMouseAndHandler();
+    if (activeDev && activeHandler) {
+      const perfState = activeDev.rendererState?.currentProfileData?.mousePerformanceState;
+      if (perfState) {
+        perfState.dpiSelectIndex = currentDpiStage - 1;
+        applyHardwareDpi(activeHandler, activeDev, perfState);
+      }
+    }
   }
 
   // Exposed for direct invocation by Glorious Core handlers or patches
-  global._bgcOnDpiButtonPress = function (buttonId, device) {
+  global._bgcOnDpiButtonPress = function (buttonId, device, handler) {
+    const now = Date.now();
+    if (now - lastDpiClickTime < 150) {
+      return; // Debounce hardware switch chatter
+    }
+    lastDpiClickTime = now;
+
     logDebug(`_bgcOnDpiButtonPress received: buttonId=${buttonId}`);
-    const devName = device?.supportedDeviceData?.name || device?.rendererState?.deviceName || defaultDeviceName;
-    if (buttonId === 6) {
-      triggerDpiCycle('down', null, devName);
+    
+    let activeDev = device;
+    let activeHandler = handler;
+    if (!activeDev || !activeHandler) {
+      const found = getActiveMouseAndHandler();
+      if (!activeDev) activeDev = found.device;
+      if (!activeHandler) activeHandler = found.handler;
+    }
+
+    const devName = activeDev?.supportedDeviceData?.name || activeDev?.rendererState?.deviceName || defaultDeviceName || 'Model D 2 Wireless';
+    const profile = activeDev?.rendererState?.currentProfileData;
+    const perfState = profile?.mousePerformanceState;
+
+    if (perfState && Array.isArray(perfState.DpiStage) && perfState.DpiStage.length > 0) {
+      const stages = perfState.DpiStage;
+      const total = stages.length;
+      let currIdx = typeof perfState.dpiSelectIndex === 'number' ? perfState.dpiSelectIndex : 0;
+      let nextIdx;
+      if (buttonId === 6) { // DPICycleDown
+        nextIdx = (currIdx - 1 + total) % total;
+      } else { // DPICycleUp / button 5
+        nextIdx = (currIdx + 1) % total;
+      }
+      perfState.dpiSelectIndex = nextIdx;
+      currentDpiStage = nextIdx + 1;
+      totalDpiStages = total;
+      cachedDpiStages = stages;
+
+      const activeStage = stages[nextIdx];
+      lastKnownDpi = activeStage.value;
+
+      logDebug(`Cycling DPI button: nextIdx=${nextIdx} (stage ${currentDpiStage}/${total}, ${lastKnownDpi} DPI, color ${activeStage.color})`);
+
+      // 1. Show OSD
+      showDpiOsd({
+        dpi: activeStage.value,
+        stageIndex: currentDpiStage,
+        totalStages: total,
+        color: activeStage.color ? (activeStage.color.startsWith('#') ? activeStage.color : '#' + activeStage.color) : undefined,
+        deviceName: devName
+      });
+
+      // 2. Hardware update: switch sensor DPI and hardware LED
+      if (activeHandler && activeDev) {
+        applyHardwareDpi(activeHandler, activeDev, perfState);
+      }
+
+      // 3. Emit to UI window if open
+      try {
+        if (typeof EventManager !== 'undefined' && typeof EventManager.emit === 'function' && typeof AppChannel !== 'undefined' && typeof DeviceChannel !== 'undefined') {
+          EventManager.emit(AppChannel.SendToWindow, DeviceChannel.PropertyUpdate_Performance, activeDev.rendererState);
+        }
+      } catch (_) {}
     } else {
-      triggerDpiCycle('up', null, devName);
+      if (buttonId === 6) {
+        triggerDpiCycle('down', null, devName);
+      } else {
+        triggerDpiCycle('up', null, devName);
+      }
     }
   };
 
@@ -962,11 +1078,15 @@ if (electron) {
         const isDpiShift = (b3 === 8 || b2 === 8 || b3 === 20 || b2 === 20);
 
         if (isDpiUp || isDpiDown || isDpiShift) {
-          const devName = deviceInfo?.name || defaultDeviceName || 'Model D 2 Wireless';
-          if (isDpiDown) {
-            triggerDpiCycle('down', null, devName);
+          if (typeof global._bgcOnDpiButtonPress === 'function') {
+            global._bgcOnDpiButtonPress(isDpiDown ? 6 : 5);
           } else {
-            triggerDpiCycle('up', null, devName);
+            const devName = deviceInfo?.name || defaultDeviceName || 'Model D 2 Wireless';
+            if (isDpiDown) {
+              triggerDpiCycle('down', null, devName);
+            } else {
+              triggerDpiCycle('up', null, devName);
+            }
           }
         }
       }

@@ -63,10 +63,16 @@ class HID {
       const isCharging = false;
       const batteryLevel = data[2];
       return { batteryLevel, isCharging };
+    } else if (data[0] == 6 && data[1] == 249 && data[2] >= 128) {
+      console.log("Mouse button event");
     }
   }
 
   static async requestBatteryStatsAndUpdateIfSuccessful(device) {
+    return true;
+  }
+
+  static async setPerformance(deviceState, mousePerformanceState) {
     return true;
   }
 
@@ -84,9 +90,41 @@ class HID {
   }
 }
 
+const DEFAULT_KEY_BUFFER = Buffer.from([
+  1, 1, 0, 0,
+  1, 2, 0, 0,
+  1, 3, 0, 0,
+  1, 4, 0, 0,
+  1, 5, 0, 0,
+  102, 3, 0, 0,
+  1, 160, 0, 0,
+  1, 161, 0, 0
+]);
+
+function mockKeybindings(dataBuffer, target, dataOffset, hidButtonId, layerOffset, boundData) {
+  if (isDPI) {
+    dataBuffer[dataOffset] = 102;
+  } else {
+    dataBuffer[dataOffset] = 1;
+  }
+
+  if (isDPI) {
+    dataBuffer[hidButtonId * 4 + 0 + layerOffset] = 102;
+  } else {
+    dataBuffer[hidButtonId * 4 + 0 + layerOffset] = 1;
+  }
+}
+
+class Device {
+  static gloriousDevices = [];
+  static init(device) {
+    Device.gloriousDevices.push(device);
+  }
+}
+
 function initApp() {
-  const tray = new Tray();
-  tray.setToolTip("Glorious Core");
+  const TrayIcon = new electron.Tray();
+  TrayIcon.setToolTip("Glorious Core");
   console.log("Glorious Core started, handleName:", handleName);
 }
 initApp();
