@@ -75,6 +75,7 @@ async function runTests() {
     assert(patchedMain.includes('_bgcParseBattery'), 'Main file should include 255 charging sentinel helper');
     assert(patchedMain.includes('_bgcOnBatteryUpdate'), 'Main file should dispatch _bgcOnBatteryUpdate event for tray and notifications');
     assert(patchedMain.includes('this.requestBatteryStatsAndUpdateIfSuccessful(device2).catch'), 'Main file should inject immediate battery query on startup');
+    assert(patchedMain.includes('global._bgcRequestBatteryStats'), 'Main file should register wake refresh callback');
 
     // Check Telemetry Blocker Patch modifications
     assert(patchedMain.includes('enabled:false,'), 'Main file should disable Sentry initialization');
@@ -95,10 +96,29 @@ async function runTests() {
     const patchedHtml = fs.readFileSync(path.join(tempExtractDir, 'out', 'renderer-process', 'index.html'), 'utf8');
     assert(patchedHtml.includes('<title>Better Glorious Core</title>'), 'HTML title should be updated');
 
-    // Check that mod files are present
-    assert(fs.existsSync(path.join(tempExtractDir, 'mod', 'main-hook.js')), 'mod/main-hook.js must be copied');
-    assert(fs.existsSync(path.join(tempExtractDir, 'mod', 'renderer-hook.js')), 'mod/renderer-hook.js must be copied');
-    assert(fs.existsSync(path.join(tempExtractDir, 'mod', 'theme.css')), 'mod/theme.css must be copied');
+    // Check that mod files are present and contain Power & Battery Saver features
+    const mainHookFile = path.join(tempExtractDir, 'mod', 'main-hook.js');
+    const rendererHookFile = path.join(tempExtractDir, 'mod', 'renderer-hook.js');
+    const themeCssFile = path.join(tempExtractDir, 'mod', 'theme.css');
+
+    assert(fs.existsSync(mainHookFile), 'mod/main-hook.js must be copied');
+    assert(fs.existsSync(rendererHookFile), 'mod/renderer-hook.js must be copied');
+    assert(fs.existsSync(themeCssFile), 'mod/theme.css must be copied');
+
+    const mainHookContent = fs.readFileSync(mainHookFile, 'utf8');
+    assert(mainHookContent.includes('powerMonitor'), 'main-hook.js should integrate Electron powerMonitor');
+    assert(mainHookContent.includes('ecoModeThreshold'), 'main-hook.js should configure Eco Mode threshold');
+    assert(mainHookContent.includes('calculateBatteryEstimate'), 'main-hook.js should calculate battery discharge estimates');
+    assert(mainHookContent.includes('lock-screen'), 'main-hook.js should listen for lock-screen event');
+    assert(mainHookContent.includes('getSystemIdleTime'), 'main-hook.js should track system idle time');
+
+    const rendererHookContent = fs.readFileSync(rendererHookFile, 'utf8');
+    assert(rendererHookContent.includes('power: {'), 'renderer-hook.js should expose power API');
+    assert(rendererHookContent.includes('bgc-eco-badge'), 'renderer-hook.js should support Eco Mode badge');
+
+    const themeCssContent = fs.readFileSync(themeCssFile, 'utf8');
+    assert(themeCssContent.includes('.bgc-eco-badge'), 'theme.css should style Eco Mode badge');
+    assert(themeCssContent.includes('.bgc-eco-active'), 'theme.css should style Eco Mode active state');
 
     // Repack
     const packResult = await packAsar(tempExtractDir, mock.asarPath);
@@ -148,6 +168,41 @@ async function runTests() {
   assert(restoreOutput.includes('Application successfully rolled back to official stock version.'), 'CLI restore should succeed');
 
   console.log('   ✔ CLI end-to-end execution passed.');
+
+  // Step 7: Test Power & Battery Saver Logic
+  console.log('7. Testing Power & Battery Saver calculations and logic...');
+  const mainHook = require('../src/mod/main-hook');
+  assert(mainHook.initialized, 'main-hook should initialize');
+  assert(mainHook.DEFAULT_POWER_CONFIG !== null, 'DEFAULT_POWER_CONFIG should exist');
+  assert.strictEqual(mainHook.DEFAULT_POWER_CONFIG.ecoModeEnabled, true);
+  assert.strictEqual(mainHook.DEFAULT_POWER_CONFIG.ecoModeThreshold, 20);
+  assert.strictEqual(mainHook.DEFAULT_POWER_CONFIG.turnOffRgbOnLock, true);
+
+  if (typeof mainHook.calculateBatteryEstimate === 'function') {
+    // Test charging estimate
+    const chargingEst = mainHook.calculateBatteryEstimate({ level: 50, isCharging: true });
+    assert(chargingEst.includes('to full'), 'Charging estimate should format time to full');
+
+    const fullyChargedEst = mainHook.calculateBatteryEstimate({ level: 100, isCharging: true });
+    assert.strictEqual(fullyChargedEst, 'Fully Charged');
+
+    // Test discharging estimate with history
+    const now = Date.now();
+    const dischargingWithHist = mainHook.calculateBatteryEstimate({
+      level: 50,
+      isCharging: false,
+      history: [
+        { time: now - 3600000, level: 52 },
+        { time: now, level: 50 }
+      ]
+    });
+    assert(dischargingWithHist.includes('remaining'), 'Discharge estimate with history should include remaining');
+
+    // Test discharging estimate fallback
+    const dischargingFallback = mainHook.calculateBatteryEstimate({ level: 80, isCharging: false });
+    assert(dischargingFallback.includes('remaining'), 'Discharge fallback estimate should calculate remaining time');
+  }
+  console.log('   ✔ Power & Battery Saver calculations passed.');
 
   // Cleanup test environment
   fs.rmSync(TEST_DIR, { recursive: true, force: true });

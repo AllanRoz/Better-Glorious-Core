@@ -13,10 +13,13 @@ Similar in spirit to *BetterDiscord* or *ReVanced*, **Better Glorious Core** dis
 - 🔄 **One-Command Rollback**: Instant restore to 100% clean vendor stock with `npm run restore` (or `--restore`).
 - 🛑 **Process Safety**: Verifies that Glorious Core is closed prior to modifying files, preventing file locks and archive corruption.
 - 🔋 **Battery Percentage & Startup Sync Fix**: Unhides numerical percentage text (`showValue: true`), eliminates the delayed 100% startup bug via instant 0ms HID queries and persistent cache, and resolves the unpadded hex VID/PID comparison bug (`0x93a` vs `0x093a`) that permanently freezes wireless mice (such as Model D 2 Wireless) at 100%.
-- ⚡ **System Tray Battery & Toast Alerts**: Displays live wireless mouse battery levels in the Windows system tray tooltip and delivers native toast notifications when battery drops to `<= 15%`.
+- 🌱 **Intelligent Low-Battery Eco Mode**: Automatically dims or turns off wireless device RGB lighting when battery level drops to `<= 20%`, extending mouse battery life when away from the charger. Automatically restores full lighting upon connecting USB power.
+- 🌙 **Lock-Screen & Sleep RGB Power-Down**: Leverages Electron's `powerMonitor` to automatically shut down peripheral lighting when Windows is locked (`Win+L`), suspended, or idle, and re-queries HID battery telemetry at 0ms upon system unlock/resume.
+- ⏳ **Battery Drain Rate & Remaining Life Estimator**: Analyzes discharge and charge velocity (%/hr) in real-time and displays estimated battery life in the system tray tooltip (e.g., `Wireless Mouse: 45% (~16h remaining)` or `80% ⚡ (Charging, ~25m to full)`).
+- ⚡ **System Tray Battery & Toast Alerts**: Displays live wireless mouse battery levels in the Windows system tray tooltip and delivers native toast notifications when battery drops to `<= 15%` or enters Eco Mode.
 - 🛡️ **Telemetry & Analytics Blocker**: Neutralizes Sentry error reporting and installs a network-level interceptor blocking outgoing traffic to Mixpanel, Google Analytics, Sentry, and Glorious tracking domains.
 - 🔒 **Auto-Updater Blocker**: Disables automatic background update checks and downloads, preventing vendor updates from silently overwriting your modded `app.asar`.
-- 🎨 **Sleek Custom Aesthetics**: Injects modern dark mode styling, custom scrollbars, and non-intrusive status indicators without modifying minified vendor bundles directly.
+- 🎨 **Sleek Custom Aesthetics**: Injects modern dark mode styling, custom scrollbars, Eco Mode status indicators, and non-intrusive status badges without modifying minified vendor bundles directly.
 - 🔌 **Dynamic Mod Loader**: Injects an Electron `BrowserWindow` lifecycle hook into the main process, allowing live CSS and JavaScript injection into the renderer at runtime.
 - 📦 **Native Dependency Unpacking**: Pre-configured with Glorious Core's required unpacking glob: `{*.node,*@koromix*,*jszip*,*keytar*}`.
 - 🚀 **Portable Executable Support**: Ready to compile into a single standalone `.exe` using `npm run build`.

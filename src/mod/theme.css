@@ -48,3 +48,27 @@
   color: #ffb800;
   margin-right: 4px;
 }
+
+#bgc-status-badge .bgc-eco-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  background: rgba(255, 184, 0, 0.15);
+  color: #ffb800;
+  border: 1px solid rgba(255, 184, 0, 0.35);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+#bgc-status-badge.bgc-eco-active {
+  border-color: rgba(255, 184, 0, 0.4);
+  box-shadow: 0 4px 14px rgba(255, 184, 0, 0.15);
+}
+
+body.bgc-system-dimmed {
+  filter: brightness(0.6);
+  transition: filter 0.5s ease;
+}
+

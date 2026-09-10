@@ -257,9 +257,9 @@ function _bgcParseBattery(deviceId, rawValue, currentChargingState) {
   if (startIntervalPattern.test(content)) {
     content = content.replace(
       startIntervalPattern,
-      '$1\n        try { this.requestBatteryStatsAndUpdateIfSuccessful($2).catch(() => {}); } catch (_) {}'
+      '$1\n        global._bgcRequestBatteryStats = () => { try { this.requestBatteryStatsAndUpdateIfSuccessful($2).catch(() => {}); } catch (_) {} };\n        try { this.requestBatteryStatsAndUpdateIfSuccessful($2).catch(() => {}); } catch (_) {}'
     );
-    statusLogs.push('Injected immediate HID battery query on device connection (0ms startup latency)');
+    statusLogs.push('Injected immediate HID battery query on device connection & registered wake refresh callback');
   }
 
   if (content !== original) {
