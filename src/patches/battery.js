@@ -201,6 +201,21 @@ const pid = \`0x\${rawPid.toString(16).toLowerCase().padStart(4, "0")}\`;`;
     const sentinelHelperCode = `
 ${sentinelHelperSignature}
 const _bgcLastBatteryMap = (global._bgcLastBatteryMap = global._bgcLastBatteryMap || new Map());
+function _bgcHandleDpiReport(deviceId, stageOrDpi, totalStages, color, profileName) {
+  if (typeof global._bgcOnDpiUpdate === 'function') {
+    try {
+      global._bgcOnDpiUpdate({
+        deviceId: String(deviceId || 'mouse'),
+        dpi: typeof stageOrDpi === 'number' && stageOrDpi > 50 ? stageOrDpi : undefined,
+        stageIndex: typeof stageOrDpi === 'number' && stageOrDpi <= 10 ? stageOrDpi : undefined,
+        totalStages: totalStages || 4,
+        color,
+        profileName
+      });
+    } catch (_) {}
+  }
+}
+global._bgcHandleDpiReport = _bgcHandleDpiReport;
 function _bgcParseBattery(deviceId, rawValue, currentChargingState) {
   const key = String(deviceId || 'default');
   let level;
@@ -219,6 +234,7 @@ function _bgcParseBattery(deviceId, rawValue, currentChargingState) {
   }
   return { batteryLevel: level, isCharging };
 }
+
 `;
     // Prepend or inject helper near top of file
     content = sentinelHelperCode + content;

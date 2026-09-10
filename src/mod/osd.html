@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>BGC DPI Overlay</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    body {
+      background: transparent;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      width: 100vw;
+    }
+
+    #osd-container {
+      width: 270px;
+      height: 72px;
+      background: rgba(13, 17, 23, 0.92);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-radius: 12px;
+      border: 1.5px solid var(--accent-color, #ffb800);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 16px var(--accent-glow, rgba(255, 184, 0, 0.3));
+      display: flex;
+      align-items: center;
+      padding: 10px 16px;
+      opacity: 0;
+      transform: translateY(10px) scale(0.96);
+      transition: opacity 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    #osd-container.visible {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+
+    #osd-container.bump {
+      animation: bumpEffect 0.18s ease-out;
+    }
+
+    @keyframes bumpEffect {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.04); }
+      100% { transform: scale(1); }
+    }
+
+    .icon-wrapper {
+      width: 42px;
+      height: 42px;
+      border-radius: 10px;
+      background: var(--icon-bg, rgba(255, 184, 0, 0.15));
+      border: 1px solid var(--accent-color, #ffb800);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-right: 14px;
+      flex-shrink: 0;
+    }
+
+    .icon-wrapper svg {
+      width: 22px;
+      height: 22px;
+      fill: var(--accent-color, #ffb800);
+    }
+
+    .info-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .primary-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+    }
+
+    .dpi-value {
+      font-size: 20px;
+      font-weight: 800;
+      color: #ffffff;
+      letter-spacing: 0.5px;
+      line-height: 1.1;
+    }
+
+    .dpi-unit {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--accent-color, #ffb800);
+      margin-left: 4px;
+      text-transform: uppercase;
+    }
+
+    .meta-text {
+      font-size: 11px;
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.65);
+      margin-top: 3px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Stage indicator pills */
+    .stages-bar {
+      display: flex;
+      gap: 4px;
+      margin-top: 5px;
+    }
+
+    .stage-pill {
+      height: 3px;
+      flex: 1;
+      border-radius: 2px;
+      background: rgba(255, 255, 255, 0.18);
+      transition: background 0.15s ease, transform 0.15s ease;
+    }
+
+    .stage-pill.active {
+      background: var(--accent-color, #ffb800);
+      box-shadow: 0 0 6px var(--accent-color, #ffb800);
+    }
+  </style>
+</head>
+<body>
+  <div id="osd-container">
+    <div class="icon-wrapper">
+      <!-- Gaming Crosshair / DPI Target Icon -->
+      <svg viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="7" stroke="currentColor" stroke-width="2" fill="none"/>
+        <circle cx="12" cy="12" r="2" fill="currentColor"/>
+        <line x1="12" y1="1" x2="12" y2="4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <line x1="12" y1="20" x2="12" y2="23" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <line x1="1" y1="12" x2="4" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <line x1="20" y1="12" x2="23" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="info-content">
+      <div class="primary-row">
+        <div>
+          <span id="dpi-num" class="dpi-value">800</span>
+          <span class="dpi-unit">DPI</span>
+        </div>
+      </div>
+      <div id="meta-info" class="meta-text">Stage 2 of 4 • Gaming</div>
+      <div id="stages-bar" class="stages-bar">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const container = document.getElementById('osd-container');
+    const dpiNum = document.getElementById('dpi-num');
+    const metaInfo = document.getElementById('meta-info');
+    const stagesBar = document.getElementById('stages-bar');
+
+    const DEFAULT_COLORS = [
+      '#FF1744', // Red (Stage 1 / 400)
+      '#FFB800', // Yellow (Stage 2 / 800)
+      '#00E5FF', // Cyan/Blue (Stage 3 / 1600)
+      '#00E676', // Green (Stage 4 / 3200)
+      '#D500F9', // Purple (Stage 5 / 6400)
+      '#FF9100'  // Orange (Stage 6)
+    ];
+
+    function updateDpi(data) {
+      if (!data) return;
+
+      const dpi = data.dpi || 800;
+      const stageIndex = typeof data.stageIndex === 'number' ? data.stageIndex : 1;
+      const totalStages = data.totalStages || 4;
+      const profileName = data.profileName || '';
+      const deviceName = data.deviceName || 'Mouse';
+
+      // Pick or compute color
+      let color = data.color;
+      if (!color) {
+        color = DEFAULT_COLORS[(stageIndex - 1) % DEFAULT_COLORS.length] || '#ffb800';
+      }
+
+      // Update CSS accent variables
+      document.documentElement.style.setProperty('--accent-color', color);
+      document.documentElement.style.setProperty('--accent-glow', color + '4D');
+      document.documentElement.style.setProperty('--icon-bg', color + '22');
+
+      // Update text values
+      dpiNum.textContent = String(dpi);
+      
+      const stageStr = `Stage ${stageIndex} of ${totalStages}`;
+      metaInfo.textContent = profileName ? `${stageStr} • ${profileName}` : `${stageStr} • ${deviceName}`;
+
+      // Render stage pills
+      stagesBar.innerHTML = '';
+      for (let i = 1; i <= totalStages; i++) {
+        const pill = document.createElement('div');
+        pill.className = 'stage-pill' + (i === stageIndex ? ' active' : '');
+        stagesBar.appendChild(pill);
+      }
+
+      // Trigger animation bump
+      container.classList.remove('bump');
+      void container.offsetWidth; // Force reflow
+      container.classList.add('bump');
+      container.classList.add('visible');
+    }
+
+    function hideDpi() {
+      container.classList.remove('visible');
+    }
+
+    // Connect to Electron IPC if available
+    try {
+      if (window.require) {
+        const electron = window.require('electron');
+        if (electron && electron.ipcRenderer) {
+          electron.ipcRenderer.on('bgc:osd-dpi', (event, data) => {
+            updateDpi(data);
+          });
+          electron.ipcRenderer.on('bgc:osd-hide', () => {
+            hideDpi();
+          });
+        }
+      }
+    } catch (_) {}
+
+    // Expose update functions on window
+    window.updateDpi = updateDpi;
+    window.hideDpi = hideDpi;
+  </script>
+</body>
+</html>

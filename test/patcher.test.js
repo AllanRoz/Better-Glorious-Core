@@ -96,14 +96,16 @@ async function runTests() {
     const patchedHtml = fs.readFileSync(path.join(tempExtractDir, 'out', 'renderer-process', 'index.html'), 'utf8');
     assert(patchedHtml.includes('<title>Better Glorious Core</title>'), 'HTML title should be updated');
 
-    // Check that mod files are present and contain Power & Battery Saver features
+    // Check that mod files are present and contain Power & Battery Saver and OSD features
     const mainHookFile = path.join(tempExtractDir, 'mod', 'main-hook.js');
     const rendererHookFile = path.join(tempExtractDir, 'mod', 'renderer-hook.js');
     const themeCssFile = path.join(tempExtractDir, 'mod', 'theme.css');
+    const osdHtmlFile = path.join(tempExtractDir, 'mod', 'osd.html');
 
     assert(fs.existsSync(mainHookFile), 'mod/main-hook.js must be copied');
     assert(fs.existsSync(rendererHookFile), 'mod/renderer-hook.js must be copied');
     assert(fs.existsSync(themeCssFile), 'mod/theme.css must be copied');
+    assert(fs.existsSync(osdHtmlFile), 'mod/osd.html must be copied');
 
     const mainHookContent = fs.readFileSync(mainHookFile, 'utf8');
     assert(mainHookContent.includes('powerMonitor'), 'main-hook.js should integrate Electron powerMonitor');
@@ -111,14 +113,21 @@ async function runTests() {
     assert(mainHookContent.includes('calculateBatteryEstimate'), 'main-hook.js should calculate battery discharge estimates');
     assert(mainHookContent.includes('lock-screen'), 'main-hook.js should listen for lock-screen event');
     assert(mainHookContent.includes('getSystemIdleTime'), 'main-hook.js should track system idle time');
+    assert(mainHookContent.includes('osdEnabled'), 'main-hook.js should configure OSD overlay');
+    assert(mainHookContent.includes('calculateOsdPosition'), 'main-hook.js should calculate OSD position');
 
     const rendererHookContent = fs.readFileSync(rendererHookFile, 'utf8');
     assert(rendererHookContent.includes('power: {'), 'renderer-hook.js should expose power API');
+    assert(rendererHookContent.includes('osd: {'), 'renderer-hook.js should expose osd API');
     assert(rendererHookContent.includes('bgc-eco-badge'), 'renderer-hook.js should support Eco Mode badge');
 
     const themeCssContent = fs.readFileSync(themeCssFile, 'utf8');
     assert(themeCssContent.includes('.bgc-eco-badge'), 'theme.css should style Eco Mode badge');
     assert(themeCssContent.includes('.bgc-eco-active'), 'theme.css should style Eco Mode active state');
+
+    const osdHtmlContent = fs.readFileSync(osdHtmlFile, 'utf8');
+    assert(osdHtmlContent.includes('osd-container'), 'osd.html should contain container layout');
+    assert(osdHtmlContent.includes('bgc:osd-dpi'), 'osd.html should listen for bgc:osd-dpi');
 
     // Repack
     const packResult = await packAsar(tempExtractDir, mock.asarPath);
@@ -202,7 +211,23 @@ async function runTests() {
     const dischargingFallback = mainHook.calculateBatteryEstimate({ level: 80, isCharging: false });
     assert(dischargingFallback.includes('remaining'), 'Discharge fallback estimate should calculate remaining time');
   }
-  console.log('   ✔ Power & Battery Saver calculations passed.');
+
+  // Test OSD / DPI Overlay configuration & position calculations
+  assert.strictEqual(mainHook.DEFAULT_POWER_CONFIG.osdEnabled, true);
+  assert.strictEqual(mainHook.DEFAULT_POWER_CONFIG.osdPosition, 'bottom-right');
+  assert.strictEqual(mainHook.DEFAULT_POWER_CONFIG.osdDurationMs, 1500);
+
+  if (typeof mainHook.calculateOsdPosition === 'function') {
+    const posBottomRight = mainHook.calculateOsdPosition('bottom-right', 300, 95);
+    assert(typeof posBottomRight.x === 'number' && typeof posBottomRight.y === 'number');
+
+    const posTopRight = mainHook.calculateOsdPosition('top-right', 300, 95);
+    assert(typeof posTopRight.x === 'number' && typeof posTopRight.y === 'number');
+
+    const posBottomCenter = mainHook.calculateOsdPosition('bottom-center', 300, 95);
+    assert(typeof posBottomCenter.x === 'number' && typeof posBottomCenter.y === 'number');
+  }
+  console.log('   ✔ Power, Battery Saver & OSD calculations passed.');
 
   // Cleanup test environment
   fs.rmSync(TEST_DIR, { recursive: true, force: true });

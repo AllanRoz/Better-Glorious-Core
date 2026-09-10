@@ -93,7 +93,10 @@ if (electron) {
     ecoModeThreshold: 20,       // Battery percentage to activate Eco Mode (<= 20%)
     turnOffRgbOnLock: true,     // Turn off or dim RGB when Windows is locked / screen off
     idleSleepTimeoutMinutes: 3, // Inactivity timeout in minutes (0 = disabled)
-    estimateBatteryLife: true   // Calculate & display hours remaining in tooltip
+    estimateBatteryLife: true,  // Calculate & display hours remaining in tooltip
+    osdEnabled: true,           // On-Screen Display HUD for DPI cycling
+    osdDurationMs: 1500,        // OSD display duration before auto-fade
+    osdPosition: 'bottom-right' // 'bottom-right', 'top-right', 'bottom-center', 'top-center'
   };
 
   let powerConfig = { ...DEFAULT_POWER_CONFIG };
@@ -409,6 +412,148 @@ if (electron) {
   }
 
   // -------------------------------------------------------------
+  // On-Screen Display (OSD) / DPI Overlay Window Manager
+  // -------------------------------------------------------------
+  let osdWindow = null;
+  let osdHideTimeout = null;
+  const osdHtmlPath = path.join(modDir, 'osd.html');
+
+  function calculateOsdPosition(posSetting = 'bottom-right', winWidth = 300, winHeight = 95) {
+    try {
+      const screen = electron ? electron.screen : null;
+      if (!screen || typeof screen.getPrimaryDisplay !== 'function') {
+        return { x: 100, y: 100 };
+      }
+      const primaryDisplay = screen.getPrimaryDisplay();
+      const area = primaryDisplay.workArea || primaryDisplay.bounds;
+      const margin = 28;
+
+      let x, y;
+      switch (posSetting) {
+        case 'top-right':
+          x = area.x + area.width - winWidth - margin;
+          y = area.y + margin;
+          break;
+        case 'bottom-center':
+          x = area.x + Math.floor((area.width - winWidth) / 2);
+          y = area.y + area.height - winHeight - margin;
+          break;
+        case 'top-center':
+          x = area.x + Math.floor((area.width - winWidth) / 2);
+          y = area.y + margin;
+          break;
+        case 'bottom-right':
+        default:
+          x = area.x + area.width - winWidth - margin;
+          y = area.y + area.height - winHeight - margin;
+          break;
+      }
+      return { x: Math.round(x), y: Math.round(y) };
+    } catch (_) {
+      return { x: 100, y: 100 };
+    }
+  }
+
+  function createOsdWindow() {
+    if (!BrowserWindow || osdWindow || !electron) return null;
+
+    try {
+      const { x, y } = calculateOsdPosition(powerConfig.osdPosition);
+
+      osdWindow = new BrowserWindow({
+        width: 300,
+        height: 95,
+        x,
+        y,
+        frame: false,
+        transparent: true,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        focusable: false,
+        show: false,
+        hasShadow: false,
+        resizable: false,
+        webPreferences: {
+          nodeIntegration: true,
+          contextIsolation: false
+        }
+      });
+
+      if (typeof osdWindow.setIgnoreMouseEvents === 'function') {
+        osdWindow.setIgnoreMouseEvents(true);
+      }
+      if (typeof osdWindow.setVisibleOnAllWorkspaces === 'function') {
+        osdWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      }
+      if (typeof osdWindow.setAlwaysOnTop === 'function') {
+        osdWindow.setAlwaysOnTop(true, 'screen-saver');
+      }
+
+      if (fs.existsSync(osdHtmlPath)) {
+        osdWindow.loadFile(osdHtmlPath);
+      }
+
+      osdWindow.on('closed', () => {
+        osdWindow = null;
+      });
+
+      return osdWindow;
+    } catch (err) {
+      console.error('[Better Glorious Core] Failed to create OSD window:', err.message);
+      return null;
+    }
+  }
+
+  function showDpiOsd(data) {
+    if (!powerConfig.osdEnabled) return;
+
+    if (!osdWindow) {
+      createOsdWindow();
+    }
+
+    if (!osdWindow || !osdWindow.webContents) return;
+
+    try {
+      if (osdHideTimeout) {
+        clearTimeout(osdHideTimeout);
+        osdHideTimeout = null;
+      }
+
+      const { x, y } = calculateOsdPosition(powerConfig.osdPosition);
+      osdWindow.setPosition(x, y);
+
+      osdWindow.webContents.send('bgc:osd-dpi', data);
+
+      if (typeof osdWindow.showInactive === 'function') {
+        osdWindow.showInactive();
+      } else {
+        osdWindow.show();
+      }
+
+      const duration = Number(powerConfig.osdDurationMs) || 1500;
+      osdHideTimeout = setTimeout(() => {
+        try {
+          if (osdWindow && osdWindow.webContents && !osdWindow.isDestroyed()) {
+            osdWindow.webContents.send('bgc:osd-hide');
+            setTimeout(() => {
+              if (osdWindow && !osdWindow.isDestroyed()) {
+                osdWindow.hide();
+              }
+            }, 200);
+          }
+        } catch (_) {}
+      }, duration);
+    } catch (err) {
+      console.error('[Better Glorious Core] OSD show error:', err.message);
+    }
+  }
+
+  // Register global DPI telemetry event listener
+  global._bgcOnDpiUpdate = function (data) {
+    showDpiOsd(data);
+  };
+
+  // -------------------------------------------------------------
   // IPC Handlers for Power Management Settings & Stats
   // -------------------------------------------------------------
   if (ipcMain && ipcMain.handle) {
@@ -430,6 +575,17 @@ if (electron) {
         };
       }
       return result;
+    });
+    ipcMain.handle('bgc:get-osd-state', () => ({
+      enabled: Boolean(powerConfig.osdEnabled),
+      position: powerConfig.osdPosition,
+      durationMs: powerConfig.osdDurationMs
+    }));
+  }
+
+  if (ipcMain && ipcMain.on) {
+    ipcMain.on('bgc:trigger-dpi-osd', (event, data) => {
+      showDpiOsd(data);
     });
   }
 
@@ -474,11 +630,12 @@ if (electron) {
     app.whenReady().then(setupTelemetryBlocker).catch(() => {});
   }
 
-
-
 module.exports = {
   initialized: true,
   DEFAULT_POWER_CONFIG: typeof DEFAULT_POWER_CONFIG !== 'undefined' ? DEFAULT_POWER_CONFIG : null,
-  calculateBatteryEstimate: typeof calculateBatteryEstimate !== 'undefined' ? calculateBatteryEstimate : null
+  calculateBatteryEstimate: typeof calculateBatteryEstimate !== 'undefined' ? calculateBatteryEstimate : null,
+  calculateOsdPosition: typeof calculateOsdPosition !== 'undefined' ? calculateOsdPosition : null,
+  showDpiOsd: typeof showDpiOsd !== 'undefined' ? showDpiOsd : null
 };
+
 

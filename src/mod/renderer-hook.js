@@ -58,6 +58,21 @@
         }
         return null;
       }
+    },
+    osd: {
+      trigger: function (dpiData) {
+        if (ipcRenderer && ipcRenderer.send) {
+          ipcRenderer.send('bgc:trigger-dpi-osd', dpiData);
+          return true;
+        }
+        return false;
+      },
+      getState: async function () {
+        if (ipcRenderer && ipcRenderer.invoke) {
+          return await ipcRenderer.invoke('bgc:get-osd-state');
+        }
+        return null;
+      }
     }
   };
 

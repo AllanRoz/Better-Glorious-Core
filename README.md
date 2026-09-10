@@ -19,6 +19,7 @@ Similar in spirit to *BetterDiscord* or *ReVanced*, **Better Glorious Core** dis
 - ⚡ **System Tray Battery & Toast Alerts**: Displays live wireless mouse battery levels in the Windows system tray tooltip and delivers native toast notifications when battery drops to `<= 15%` or enters Eco Mode.
 - 🛡️ **Telemetry & Analytics Blocker**: Neutralizes Sentry error reporting and installs a network-level interceptor blocking outgoing traffic to Mixpanel, Google Analytics, Sentry, and Glorious tracking domains.
 - 🔒 **Auto-Updater Blocker**: Disables automatic background update checks and downloads, preventing vendor updates from silently overwriting your modded `app.asar`.
+- 🖥️ **Gaming On-Screen Display (OSD) HUD**: Renders a sleek, translucent floating overlay on your screen whenever you press the physical DPI button, showing the current DPI value (e.g., `800 DPI`), stage number (`Stage 2 of 4`), active profile, and color accent with a 1.5s auto-fade. Click-through and non-intrusive so it never steals focus from games.
 - 🎨 **Sleek Custom Aesthetics**: Injects modern dark mode styling, custom scrollbars, Eco Mode status indicators, and non-intrusive status badges without modifying minified vendor bundles directly.
 - 🔌 **Dynamic Mod Loader**: Injects an Electron `BrowserWindow` lifecycle hook into the main process, allowing live CSS and JavaScript injection into the renderer at runtime.
 - 📦 **Native Dependency Unpacking**: Pre-configured with Glorious Core's required unpacking glob: `{*.node,*@koromix*,*jszip*,*keytar*}`.
@@ -49,7 +50,8 @@ Better-Glorious-Core/
 │   └── mod/
 │       ├── main-hook.js       # Main process runtime hook: browser window interceptor & network blocker
 │       ├── renderer-hook.js   # Injected into DOM: banner, mod API, status badge
-│       └── theme.css          # Modern dark CSS enhancements
+│       ├── theme.css          # Modern dark CSS enhancements
+│       └── osd.html           # Translucent click-through gaming DPI overlay HUD
 └── test/
     ├── fixture.js             # Mock Glorious Core v2 generator
     └── patcher.test.js        # Automated unit and integration test suite
