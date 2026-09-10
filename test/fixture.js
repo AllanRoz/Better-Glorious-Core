@@ -73,7 +73,24 @@ class HID {
   }
 
   static async setPerformance(deviceState, mousePerformanceState) {
-    return true;
+    let delay = 30;
+    switch (device.communicationMethod) {
+      case "USB":
+      case "Reciever":
+        delay = 150;
+        break;
+      case "Bluetooth":
+        delay = 30;
+        break;
+      default:
+        throw new Error("Invalid communication method: " + device.communicationMethod);
+    }
+    for (const buffer2 of buffers) {
+      await this.sendReportToDevice(device, buffer2, delay);
+    }
+    DataStorage.saveDeviceInstance(device.toRecord());
+    DataStorage.saveDeviceProfile(device.rendererState.currentProfileData);
+    return device.rendererState;
   }
 
   static setupDevice(device) {

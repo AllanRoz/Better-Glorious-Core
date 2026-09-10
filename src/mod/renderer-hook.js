@@ -76,23 +76,23 @@
     }
   };
 
-  // Mount or update UI status badge
+  // Mount or update UI status badge (only when Eco Mode is actively conserving power)
   function updateBadge() {
     let badge = document.getElementById('bgc-status-badge');
+    if (!_ecoModeActive) {
+      if (badge) badge.remove();
+      return;
+    }
+
     if (!badge) {
       badge = document.createElement('div');
       badge.id = 'bgc-status-badge';
       document.body.appendChild(badge);
     }
 
-    if (_ecoModeActive) {
-      const levelText = typeof _lastBatteryLevel === 'number' ? ` (${_lastBatteryLevel}%)` : '';
-      badge.innerHTML = `<span class="bgc-accent">⚡</span>Better Glorious Core<span class="bgc-eco-badge">🔋 Eco Mode${levelText}</span>`;
-      badge.classList.add('bgc-eco-active');
-    } else {
-      badge.innerHTML = '<span class="bgc-accent">⚡</span>Better Glorious Core';
-      badge.classList.remove('bgc-eco-active');
-    }
+    const levelText = typeof _lastBatteryLevel === 'number' ? ` (${_lastBatteryLevel}%)` : '';
+    badge.innerHTML = `<span class="bgc-eco-badge">🔋 Eco Mode${levelText}</span>`;
+    badge.classList.add('bgc-eco-active');
   }
 
   // Hook IPC messages from main process

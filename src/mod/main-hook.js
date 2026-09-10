@@ -850,7 +850,7 @@ if (electron) {
   let lastDpiClickTime = 0;
   function triggerDpiCycle(direction = 'up', explicitStage = null, devName = null) {
     const now = Date.now();
-    if (explicitStage === null && now - lastDpiClickTime < 150) {
+    if (explicitStage === null && now - lastDpiClickTime < 60) {
       return; // Debounce hardware switch chatter
     }
     lastDpiClickTime = now;
@@ -895,7 +895,7 @@ if (electron) {
   // Exposed for direct invocation by Glorious Core handlers or patches
   global._bgcOnDpiButtonPress = function (buttonId, device, handler) {
     const now = Date.now();
-    if (now - lastDpiClickTime < 150) {
+    if (now - lastDpiClickTime < 180) {
       return; // Debounce hardware switch chatter
     }
     lastDpiClickTime = now;
@@ -1070,12 +1070,18 @@ if (electron) {
       );
 
       if (isButtonReport) {
+        // Ignore button release (keyup) events - only trigger on press (bit 7 set / >= 128)
+        const isKeyDown = (b0 === 249 || b0 === 247 || b0 === 248) ? (data[1] >= 128) : (data[2] >= 128);
+        if (!isKeyDown) {
+          return;
+        }
+
         const b2 = data[2];
         const b3 = data[3];
         // Button IDs from Glorious DeviceButtonMapping: 5 = DPICycleUp, 6 = DPICycleDown, 8 = DPIShift
-        const isDpiUp = (b3 === 5 || b2 === 5 || (b0 === 249 && (b1 === 5 || b2 === 5)));
-        const isDpiDown = (b3 === 6 || b2 === 6 || (b0 === 249 && (b1 === 6 || b2 === 6)));
-        const isDpiShift = (b3 === 8 || b2 === 8 || b3 === 20 || b2 === 20);
+        const isDpiUp = (b3 === 5 || (b0 === 249 && b2 === 5));
+        const isDpiDown = (b3 === 6 || (b0 === 249 && b2 === 6));
+        const isDpiShift = (b3 === 8 || (b0 === 249 && b2 === 8));
 
         if (isDpiUp || isDpiDown || isDpiShift) {
           if (typeof global._bgcOnDpiButtonPress === 'function') {

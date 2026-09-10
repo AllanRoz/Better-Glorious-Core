@@ -83,6 +83,7 @@ async function runTests() {
     assert(patchedMain.includes('dataBuffer[hidButtonId * 4 + 0 + layerOffset] = 4;'), 'Main file should route DPI cycle to host in setBufferValueFromBinding');
     assert(patchedMain.includes('specificDeviceHandler?.updateAllKeyBinding'), 'Main file should auto-sync keybindings on device connect');
     assert(patchedMain.includes('global._bgcDeviceClass = Device;'), 'Main file should expose Device class for hardware sync');
+    assert(patchedMain.includes('_chunkDelay = _bIdx === 0 ? 5 : delay'), 'Main file should optimize setPerformance packet delays to <50ms');
 
     // Check Telemetry Blocker Patch modifications
     assert(patchedMain.includes('enabled:false,'), 'Main file should disable Sentry initialization');

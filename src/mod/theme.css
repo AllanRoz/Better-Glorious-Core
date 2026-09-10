@@ -19,8 +19,9 @@
   background: rgba(255, 255, 255, 0.4);
 }
 
-/* Subtle Better Glorious Core watermark / badge in UI */
+/* UI Status Badge (only displayed during Eco Mode) */
 #bgc-status-badge {
+  display: none;
   position: fixed;
   bottom: 8px;
   right: 12px;
@@ -40,18 +41,12 @@
   transition: opacity 0.3s ease;
 }
 
-#bgc-status-badge:hover {
-  opacity: 1;
-}
-
-#bgc-status-badge .bgc-accent {
-  color: #ffb800;
-  margin-right: 4px;
+#bgc-status-badge.bgc-eco-active {
+  display: block;
 }
 
 #bgc-status-badge .bgc-eco-badge {
   display: inline-block;
-  margin-left: 6px;
   padding: 1px 5px;
   background: rgba(255, 184, 0, 0.15);
   color: #ffb800;

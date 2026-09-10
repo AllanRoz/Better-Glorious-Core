@@ -247,10 +247,10 @@ const pid = \`0x\${rawPid.toString(16).toLowerCase().padStart(4, "0")}\`;`;
   if (mouseV2BtnPattern.test(content)) {
     content = content.replace(
       mouseV2BtnPattern,
-      `else if (((data[0] == 6 && (data[1] == 249 || data[1] == 247)) || data[0] == 249 || data[0] == 247)) {
+      `else if (((data[0] == 6 && (data[1] == 249 || data[1] == 247) && data[2] >= 128) || ((data[0] == 249 || data[0] == 247) && data[1] >= 128))) {
         try {
           const _btnId = data[0] == 6 ? data[3] : data[2];
-          if (typeof global._bgcOnDpiButtonPress === 'function' && (_btnId == 5 || _btnId == 6 || _btnId == 8 || data[3] == 5 || data[2] == 5)) {
+          if (typeof global._bgcOnDpiButtonPress === 'function' && (_btnId == 5 || _btnId == 6 || _btnId == 8)) {
             global._bgcOnDpiButtonPress(_btnId, device, this);
           }
         } catch (_) {}`
@@ -368,6 +368,28 @@ const pid = \`0x\${rawPid.toString(16).toLowerCase().padStart(4, "0")}\`;`;
     } catch (_) {}`
     );
     statusLogs.push('Hooked Device.init to automatically sync keybindings to mouse onboard flash');
+  }
+
+  // Target A.11: Optimize setPerformance report transmission delays and async persistence (<50ms)
+  const perfDelayPattern = /let\s+delay\s*=\s*30;\s*switch\s*\(\s*device\.communicationMethod\s*\)\s*\{\s*case\s*["']USB["']:\s*case\s*["']Reciever["']:\s*delay\s*=\s*150;\s*break;\s*case\s*["']Bluetooth["']:\s*delay\s*=\s*30;\s*break;\s*default:\s*throw\s+new\s+Error\([^)]+\);\s*\}\s*for\s*\(\s*const\s+buffer2\s+of\s+buffers\s*\)\s*\{\s*await\s+this\.sendReportToDevice\(device,\s*buffer2,\s*delay\);\s*\}\s*DataStorage\.saveDeviceInstance\(device\.toRecord\(\)\);\s*DataStorage\.saveDeviceProfile\(device\.rendererState\.currentProfileData\);/g;
+
+  if (perfDelayPattern.test(content)) {
+    content = content.replace(
+      perfDelayPattern,
+      `let delay = (device.communicationMethod === "Bluetooth") ? 20 : 15;
+    for (let _bIdx = 0; _bIdx < buffers.length; _bIdx++) {
+      const buffer2 = buffers[_bIdx];
+      const _chunkDelay = _bIdx === 0 ? 5 : delay;
+      await this.sendReportToDevice(device, buffer2, _chunkDelay);
+    }
+    setTimeout(() => {
+      try {
+        DataStorage.saveDeviceInstance(device.toRecord());
+        DataStorage.saveDeviceProfile(device.rendererState.currentProfileData);
+      } catch (_) {}
+    }, 10);`
+    );
+    statusLogs.push('Optimized setPerformance inter-packet delays and async disk serialization (<50ms)');
   }
 
   // -------------------------------------------------------------
