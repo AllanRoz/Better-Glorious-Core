@@ -209,17 +209,41 @@ async function runTests() {
     const fullyChargedEst = mainHook.calculateBatteryEstimate({ level: 100, isCharging: true });
     assert.strictEqual(fullyChargedEst, 'Fully Charged');
 
-    // Test discharging estimate with history
+    // Test charging estimate with upward history
     const now = Date.now();
+    const chargingWithHist = mainHook.calculateBatteryEstimate({
+      level: 60,
+      isCharging: true,
+      history: [
+        { time: now - 3600000, level: 20, isCharging: true },
+        { time: now, level: 60, isCharging: true }
+      ]
+    });
+    assert(chargingWithHist.includes('to full'), 'Charging with upward history should estimate time to full');
+
+    // Test discharging estimate with downward history
     const dischargingWithHist = mainHook.calculateBatteryEstimate({
       level: 50,
       isCharging: false,
       history: [
-        { time: now - 3600000, level: 52 },
-        { time: now, level: 50 }
+        { time: now - 3600000, level: 52, isCharging: false },
+        { time: now, level: 50, isCharging: false }
       ]
     });
     assert(dischargingWithHist.includes('remaining'), 'Discharge estimate with history should include remaining');
+
+    // Test mixed history (charged then unplugged and discharging)
+    const mixedHistoryEstimate = mainHook.calculateBatteryEstimate({
+      level: 78,
+      isCharging: false,
+      history: [
+        { time: now - 7200000, level: 40, isCharging: true },
+        { time: now - 3600000, level: 80, isCharging: true },
+        { time: now - 1800000, level: 79, isCharging: false },
+        { time: now, level: 78, isCharging: false }
+      ]
+    });
+    assert(mixedHistoryEstimate.includes('remaining'), 'Mixed history should correctly isolate recent discharge points');
 
     // Test discharging estimate fallback
     const dischargingFallback = mainHook.calculateBatteryEstimate({ level: 80, isCharging: false });
@@ -257,6 +281,7 @@ async function runTests() {
   assert.strictEqual(mainHook.DEFAULT_POLLING_CONFIG.gameRate, 1000);
   assert.strictEqual(mainHook.DEFAULT_POLLING_CONFIG.lowBatteryRate, 500);
   assert.strictEqual(mainHook.DEFAULT_POLLING_CONFIG.lowBatteryThreshold, 20);
+  assert.strictEqual(mainHook.DEFAULT_POLLING_CONFIG.checkIntervalMs, 300000, 'Check interval must be 5 minutes (300,000 ms)');
   assert(Array.isArray(mainHook.DEFAULT_POLLING_CONFIG.games), 'Default games must be an array');
   assert(mainHook.DEFAULT_POLLING_CONFIG.games.includes('cs2.exe'), 'Must contain cs2.exe');
   assert(mainHook.DEFAULT_POLLING_CONFIG.games.includes('valorant.exe'), 'Must contain valorant.exe');

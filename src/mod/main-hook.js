@@ -131,7 +131,7 @@ if (electron) {
     lowBatteryRate: 500,        // 500 Hz when battery <= lowBatteryThreshold
     lowBatteryThreshold: 20,    // Battery percentage to trigger low battery rate
     showOsdOnSwitch: false,     // Display HUD notification disabled
-    checkIntervalMs: 3000,      // Process scan interval in ms
+    checkIntervalMs: 300000,    // Process scan interval in ms (5 minutes)
     games: [
       'cs2.exe',
       'csgo.exe',
@@ -168,6 +168,11 @@ if (electron) {
         const raw = JSON.parse(fs.readFileSync(POLLING_CONFIG_FILE, 'utf8'));
         if (typeof raw === 'object' && raw !== null) {
           pollingConfig = { ...DEFAULT_POLLING_CONFIG, ...raw };
+          // If using the old default (3s or 3m), migrate to 5 minutes
+          if (raw.checkIntervalMs === 3000 || raw.checkIntervalMs === 180000) {
+            pollingConfig.checkIntervalMs = 300000;
+            savePollingConfig();
+          }
         }
       }
     } catch (_) {}
@@ -315,7 +320,12 @@ if (electron) {
       if (fs.existsSync(BATTERY_CACHE_FILE)) {
         const raw = JSON.parse(fs.readFileSync(BATTERY_CACHE_FILE, 'utf8'));
         if (typeof raw === 'object' && raw !== null) {
+          const now = Date.now();
+          const ONE_DAY_MS = 24 * 60 * 60 * 1000;
           for (const [k, v] of Object.entries(raw)) {
+            if (v && Array.isArray(v.history)) {
+              v.history = v.history.filter((pt) => (now - pt.time) <= ONE_DAY_MS);
+            }
             _deviceBatteryStates.set(k, v);
           }
         }
@@ -350,8 +360,29 @@ if (electron) {
     if (isCharging) {
       if (level >= 100) return 'Fully Charged';
       // Estimate charge time remaining (standard mice charge at ~40-60% per hr)
+      let chargeRatePerHour = 50;
+      if (Array.isArray(history) && history.length >= 2) {
+        const chargingPts = [];
+        for (let i = history.length - 1; i >= 0; i--) {
+          const pt = history[i];
+          if (pt.isCharging === false) break;
+          chargingPts.unshift(pt);
+        }
+        if (chargingPts.length >= 2) {
+          const oldest = chargingPts[0];
+          const newest = chargingPts[chargingPts.length - 1];
+          const hoursDiff = (newest.time - oldest.time) / (1000 * 60 * 60);
+          const levelDiff = newest.level - oldest.level;
+          if (hoursDiff >= 0.05 && levelDiff > 0) {
+            const computed = levelDiff / hoursDiff;
+            if (computed >= 10 && computed <= 100) {
+              chargeRatePerHour = computed;
+            }
+          }
+        }
+      }
       const remainingPercent = 100 - level;
-      const estimatedMinutes = Math.round((remainingPercent / 50) * 60);
+      const estimatedMinutes = Math.round((remainingPercent / chargeRatePerHour) * 60);
       return estimatedMinutes < 60
         ? `~${estimatedMinutes}m to full`
         : `~${Math.floor(estimatedMinutes / 60)}h ${estimatedMinutes % 60}m to full`;
@@ -360,8 +391,16 @@ if (electron) {
     // When discharging: compute rate from history if available
     let ratePerHour = null;
     if (Array.isArray(history) && history.length >= 2) {
-      const oldest = history[0];
-      const newest = history[history.length - 1];
+      const nonChargingPts = [];
+      for (let i = history.length - 1; i >= 0; i--) {
+        const pt = history[i];
+        if (pt.isCharging === true) break;
+        nonChargingPts.unshift(pt);
+      }
+
+      const targetPts = nonChargingPts.length >= 2 ? nonChargingPts : history;
+      const oldest = targetPts[0];
+      const newest = targetPts[targetPts.length - 1];
       const hoursDiff = (newest.time - oldest.time) / (1000 * 60 * 60);
       const levelDiff = oldest.level - newest.level;
 
@@ -437,18 +476,24 @@ if (electron) {
     if (deviceId && typeof level === 'number') {
       const normId = normalizeDeviceId(deviceId);
       const existing = _deviceBatteryStates.get(normId) || { history: [] };
-      const history = Array.isArray(existing.history) ? [...existing.history] : [];
+      const rawHistory = Array.isArray(existing.history) ? [...existing.history] : [];
 
       const now = Date.now();
-      // Record history if not charging and level changed or 5 mins passed
-      if (!isCharging) {
-        if (history.length === 0 || history[history.length - 1].level !== level || (now - history[history.length - 1].time > 5 * 60 * 1000)) {
-          history.push({ time: now, level });
-          if (history.length > 15) history.shift();
-        }
-      } else {
-        // Clear discharge history when plugged in
-        history.length = 0;
+      const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+      // Retain points within the past 24 hours
+      const history = rawHistory.filter((pt) => (now - pt.time) <= ONE_DAY_MS);
+
+      const lastPoint = history.length > 0 ? history[history.length - 1] : null;
+      const shouldRecord = (
+        !lastPoint ||
+        lastPoint.level !== level ||
+        Boolean(lastPoint.isCharging) !== Boolean(isCharging) ||
+        (now - lastPoint.time > 5 * 60 * 1000)
+      );
+
+      if (shouldRecord) {
+        history.push({ time: now, level, isCharging: Boolean(isCharging) });
+        if (history.length > 300) history.shift();
       }
 
       const ecoActive = Boolean(
@@ -479,7 +524,8 @@ if (electron) {
         deviceId: normId,
         level,
         isCharging,
-        estimate: calculateBatteryEstimate(newState)
+        estimate: calculateBatteryEstimate(newState),
+        history: newState.history
       });
 
       // Check Eco Mode state transition
@@ -860,10 +906,10 @@ if (electron) {
     if (pollingMonitorInterval) {
       clearInterval(pollingMonitorInterval);
     }
-    const interval = Math.max(1000, Number(pollingConfig.checkIntervalMs) || 3000);
+    const interval = Math.max(1000, Number(pollingConfig.checkIntervalMs) || 300000);
     pollingMonitorInterval = setInterval(checkActiveProcesses, interval);
     setTimeout(checkActiveProcesses, 1500);
-    logDebug('Dynamic Polling Rate monitor initialized.');
+    logDebug(`Dynamic Polling Rate monitor initialized (interval=${interval}ms).`);
   }
 
   startPollingMonitor();
@@ -1227,8 +1273,21 @@ if (electron) {
       for (const [k, v] of _deviceBatteryStates.entries()) {
         result[k] = {
           ...v,
-          estimate: calculateBatteryEstimate(v)
+          estimate: calculateBatteryEstimate(v),
+          history: v.history || []
         };
+      }
+      return result;
+    });
+    ipcMain.handle('bgc:get-battery-history', (event, deviceId) => {
+      if (deviceId) {
+        const norm = normalizeDeviceId(deviceId);
+        const state = _deviceBatteryStates.get(norm);
+        return state?.history || [];
+      }
+      const result = {};
+      for (const [k, v] of _deviceBatteryStates.entries()) {
+        result[k] = v.history || [];
       }
       return result;
     });
