@@ -4,6 +4,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { execFile } = require('child_process');
 
 let electron = null;
 try {
@@ -86,6 +87,7 @@ if (electron) {
   // -------------------------------------------------------------
   const userDataDir = (app && app.getPath) ? app.getPath('userData') : (process.env.APPDATA || __dirname);
   const POWER_CONFIG_FILE = path.join(userDataDir, 'bgc-power-config.json');
+  const POLLING_CONFIG_FILE = path.join(userDataDir, 'bgc-polling-config.json');
   const BATTERY_CACHE_FILE = path.join(userDataDir, 'bgc-battery-cache.json');
   const DEBUG_LOG_FILE = path.join(userDataDir, 'bgc-debug.log');
 
@@ -103,7 +105,7 @@ if (electron) {
     turnOffRgbOnLock: true,     // Turn off or dim RGB when Windows is locked / screen off
     idleSleepTimeoutMinutes: 3, // Inactivity timeout in minutes (0 = disabled)
     estimateBatteryLife: true,  // Calculate & display hours remaining in tooltip
-    osdEnabled: true,           // On-Screen Display HUD for DPI cycling
+    osdEnabled: false,          // On-Screen Display HUD disabled
     osdDurationMs: 1500,        // OSD display duration before auto-fade
     osdPosition: 'bottom-right' // 'bottom-right', 'top-right', 'bottom-center', 'top-center'
   };
@@ -118,6 +120,63 @@ if (electron) {
           powerConfig = { ...DEFAULT_POWER_CONFIG, ...raw };
         }
       }
+    } catch (_) {}
+    powerConfig.osdEnabled = false;
+  }
+
+  const DEFAULT_POLLING_CONFIG = {
+    enabled: true,
+    desktopRate: 1000,          // 500 or 1000 Hz for desktop / eco browsing
+    gameRate: 1000,             // 1000 Hz (or 2000/4000/8000 for high-polling mice)
+    lowBatteryRate: 500,        // 500 Hz when battery <= lowBatteryThreshold
+    lowBatteryThreshold: 20,    // Battery percentage to trigger low battery rate
+    showOsdOnSwitch: false,     // Display HUD notification disabled
+    checkIntervalMs: 3000,      // Process scan interval in ms
+    games: [
+      'cs2.exe',
+      'csgo.exe',
+      'valorant.exe',
+      'valorant-win64-shipping.exe',
+      'r5apex.exe',
+      'overwatch.exe',
+      'fortniteclient-win64-shipping.exe',
+      'rainbowsix.exe',
+      'rainbowsix_vulkan.exe',
+      'dota2.exe',
+      'league of legends.exe',
+      'cod.exe',
+      'pubg.exe',
+      'tslgame.exe',
+      'rocketleague.exe',
+      'destiny2.exe',
+      'halo_infinite.exe',
+      'marvelrivals.exe',
+      'helldivers2.exe',
+      'thefinals.exe',
+      'rust.exe',
+      'cyberpunk2077.exe',
+      'gta5.exe',
+      'warframe.x64.exe'
+    ]
+  };
+
+  let pollingConfig = { ...DEFAULT_POLLING_CONFIG };
+
+  function loadPollingConfig() {
+    try {
+      if (fs.existsSync(POLLING_CONFIG_FILE)) {
+        const raw = JSON.parse(fs.readFileSync(POLLING_CONFIG_FILE, 'utf8'));
+        if (typeof raw === 'object' && raw !== null) {
+          pollingConfig = { ...DEFAULT_POLLING_CONFIG, ...raw };
+        }
+      }
+    } catch (_) {}
+    pollingConfig.showOsdOnSwitch = false;
+  }
+
+  function savePollingConfig() {
+    try {
+      fs.writeFileSync(POLLING_CONFIG_FILE, JSON.stringify(pollingConfig, null, 2), 'utf8');
     } catch (_) {}
   }
 
@@ -170,6 +229,7 @@ if (electron) {
   loadInitialProfileData();
 
   loadPowerConfig();
+  loadPollingConfig();
 
   // -------------------------------------------------------------
   // System Tray Live Battery, Eco Mode & Power Estimations
@@ -589,8 +649,6 @@ if (electron) {
   // -------------------------------------------------------------
   // On-Screen Display (OSD) / DPI Overlay Window Manager
   // -------------------------------------------------------------
-  let osdWindow = null;
-  let osdHideTimeout = null;
   const osdHtmlPath = path.join(modDir, 'osd.html');
   let osdHtmlContent = '';
   try {
@@ -635,171 +693,180 @@ if (electron) {
     }
   }
 
+  let osdWindow = null;
   let isOsdReady = false;
   let pendingOsdData = null;
   let isOsdInitialized = false;
+  let osdHideTimeout = null;
+  let osdWindowCloseTimeout = null;
 
   function createOsdWindow() {
-    if (!BrowserWindow || osdWindow || !electron) return null;
-
-    try {
-      const { x, y } = calculateOsdPosition(powerConfig.osdPosition);
-
-      osdWindow = new BrowserWindow({
-        width: 300,
-        height: 95,
-        x,
-        y,
-        frame: false,
-        transparent: true,
-        backgroundColor: '#00000000',
-        alwaysOnTop: true,
-        skipTaskbar: true,
-        focusable: false,
-        show: false,
-        hasShadow: false,
-        resizable: false,
-        webPreferences: {
-          nodeIntegration: true,
-          contextIsolation: false,
-          sandbox: false
-        }
-      });
-
-      try {
-        if (typeof osdWindow.setIgnoreMouseEvents === 'function') {
-          osdWindow.setIgnoreMouseEvents(true);
-        }
-      } catch (_) {}
-
-      try {
-        if (typeof osdWindow.setVisibleOnAllWorkspaces === 'function') {
-          osdWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-        }
-      } catch (_) {}
-
-      try {
-        if (typeof osdWindow.setAlwaysOnTop === 'function') {
-          osdWindow.setAlwaysOnTop(true, 'screen-saver');
-        }
-      } catch (_) {}
-
-      if (osdHtmlContent) {
-        osdWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(osdHtmlContent)}`);
-      } else if (fs.existsSync(osdHtmlPath)) {
-        osdWindow.loadFile(osdHtmlPath);
-      }
-
-      osdWindow.webContents.on('did-finish-load', () => {
-        isOsdReady = true;
-        logDebug('OSD window loaded and ready');
-        if (pendingOsdData) {
-          const data = pendingOsdData;
-          pendingOsdData = null;
-          showDpiOsd(data);
-        }
-      });
-
-      osdWindow.on('closed', () => {
-        osdWindow = null;
-        isOsdReady = false;
-      });
-
-      return osdWindow;
-    } catch (err) {
-      console.error('[Better Glorious Core] Failed to create OSD window:', err.message);
-      return null;
-    }
+    // OSD HUD overlay completely disabled
+    return null;
   }
 
-  // Preload OSD window on app ready
+  // Preload OSD window on app ready (disabled)
   if (app && app.whenReady) {
     app.whenReady().then(() => {
-      setTimeout(() => {
-        try {
-          if (!osdWindow && powerConfig.osdEnabled) {
-            createOsdWindow();
-          }
-        } catch (_) {}
-      }, 1000);
+      // OSD overlay disabled
     });
   }
 
+  function hideOsd() {
+    if (osdHideTimeout) {
+      clearTimeout(osdHideTimeout);
+      osdHideTimeout = null;
+    }
+    if (osdWindowCloseTimeout) {
+      clearTimeout(osdWindowCloseTimeout);
+      osdWindowCloseTimeout = null;
+    }
+    if (osdWindow && !osdWindow.isDestroyed()) {
+      try { osdWindow.destroy(); } catch (_) {}
+      osdWindow = null;
+    }
+  }
+
   function showDpiOsd(data) {
-    if (!powerConfig.osdEnabled) return;
+    // OSD HUD overlay completely disabled
+  }
 
-    logDebug(`showDpiOsd invoked: data=${JSON.stringify(data)}, isOsdReady=${isOsdReady}, hasOsdWindow=${Boolean(osdWindow)}`);
+  function showPollingOsd(data) {
+    // OSD HUD overlay completely disabled
+  }
 
-    if (!osdWindow || osdWindow.isDestroyed()) {
-      createOsdWindow();
+  let isCheckingProcesses = false;
+  let lastGameActive = false;
+  let activeGameName = null;
+  let currentAppliedPollingRate = null;
+  let pollingMonitorInterval = null;
+
+  function evaluateAndApplyPollingRate(isGameRunning, gameName, force = false) {
+    if (!pollingConfig.enabled) return null;
+
+    const { device: activeDev, handler: activeHandler } = getActiveMouseAndHandler();
+    if (!activeDev || !activeHandler) return null;
+
+    const perfState = activeDev.rendererState?.currentProfileData?.mousePerformanceState;
+    if (!perfState) return null;
+
+    const devId = activeDev.supportedDeviceData?.name || activeDev.rendererState?.deviceName || defaultDeviceName;
+    const batState = _deviceBatteryStates.get(devId);
+    const isCharging = batState ? Boolean(batState.isCharging) : false;
+    const batLevel = batState && typeof batState.level === 'number' ? batState.level : 100;
+    const isLowBattery = !isCharging && batLevel <= (pollingConfig.lowBatteryThreshold || 20);
+
+    let targetRate;
+    let reason;
+
+    if (isLowBattery) {
+      targetRate = pollingConfig.lowBatteryRate || 500;
+      reason = `Battery Saver (${batLevel}%)`;
+    } else if (isGameRunning) {
+      targetRate = pollingConfig.gameRate || 1000;
+      reason = gameName ? `Game: ${gameName}` : 'Game Mode';
+    } else {
+      targetRate = pollingConfig.desktopRate || 1000;
+      reason = 'Desktop / Eco Mode';
     }
 
-    if (!isOsdReady || !osdWindow || !osdWindow.webContents || osdWindow.isDestroyed()) {
-      pendingOsdData = data;
-      return;
+    const supported = perfState.pollingratearray || activeDev.supportedDeviceData?.pollingratearray || [125, 250, 500, 1000];
+    if (Array.isArray(supported) && supported.length > 0) {
+      if (!supported.includes(targetRate)) {
+        if (targetRate > supported[supported.length - 1]) {
+          targetRate = supported[supported.length - 1];
+        } else {
+          targetRate = supported.reduce((prev, curr) => Math.abs(curr - targetRate) < Math.abs(prev - targetRate) ? curr : prev);
+        }
+      }
+    }
+
+    const isFirstRun = (currentAppliedPollingRate === null);
+    const currentRate = perfState.wirelessPollingRate || perfState.pollingrate || 1000;
+    const modeChanged = (lastGameActive !== isGameRunning) || (currentAppliedPollingRate !== targetRate);
+
+    if (!force && currentRate === targetRate && !modeChanged) {
+      return { targetRate, reason, changed: false };
+    }
+
+    lastGameActive = isGameRunning;
+    activeGameName = gameName;
+    currentAppliedPollingRate = targetRate;
+
+    perfState.pollingrate = targetRate;
+    perfState.wirelessPollingRate = targetRate;
+
+    logDebug(`Dynamic Polling Rate: Applying ${targetRate}Hz (${reason})`);
+
+    applyHardwareDpi(activeHandler, activeDev, perfState);
+
+    if (pollingConfig.showOsdOnSwitch && modeChanged && !isFirstRun) {
+      showPollingOsd({
+        pollingRate: targetRate,
+        reason: reason,
+        isGame: isGameRunning,
+        isLowBattery: isLowBattery,
+        deviceName: devId
+      });
     }
 
     try {
-      if (osdHideTimeout) {
-        clearTimeout(osdHideTimeout);
-        osdHideTimeout = null;
+      if (typeof EventManager !== 'undefined' && typeof EventManager.emit === 'function' && typeof AppChannel !== 'undefined' && typeof DeviceChannel !== 'undefined') {
+        EventManager.emit(AppChannel.SendToWindow, DeviceChannel.PropertyUpdate_Performance, activeDev.rendererState);
       }
+    } catch (_) {}
 
-      const { x, y } = calculateOsdPosition(powerConfig.osdPosition);
-      try {
-        osdWindow.setPosition(x, y);
-      } catch (_) {}
+    return { targetRate, reason, changed: true };
+  }
 
-      const payloadJson = JSON.stringify(data);
-      if (osdWindow.webContents && !osdWindow.webContents.isDestroyed()) {
-        osdWindow.webContents.executeJavaScript(`
-          if (typeof window.updateDpi === 'function') {
-            window.updateDpi(${payloadJson});
+  function checkActiveProcesses() {
+    if (isCheckingProcesses || !pollingConfig.enabled) return;
+    isCheckingProcesses = true;
+
+    try {
+      execFile('tasklist', ['/FO', 'CSV', '/NH'], { windowsHide: true }, (err, stdout) => {
+        isCheckingProcesses = false;
+        if (err || !stdout) return;
+
+        const lines = stdout.split(/\r?\n/);
+        const runningExes = new Set();
+        for (const line of lines) {
+          if (!line) continue;
+          const m = line.match(/^"([^"]+)"/);
+          if (m) {
+            runningExes.add(m[1].toLowerCase());
           }
-        `).catch(() => {});
-        try {
-          osdWindow.webContents.send('bgc:osd-dpi', data);
-        } catch (_) {}
-      }
-
-      try {
-        osdWindow.setAlwaysOnTop(true, 'screen-saver');
-        osdWindow.moveTop();
-        if (typeof osdWindow.showInactive === 'function') {
-          osdWindow.showInactive();
-        } else {
-          osdWindow.show();
         }
-      } catch (_) {}
 
-      const duration = Number(powerConfig.osdDurationMs) || 1500;
-      osdHideTimeout = setTimeout(() => {
-        try {
-          if (osdWindow && !osdWindow.isDestroyed()) {
-            if (osdWindow.webContents && !osdWindow.webContents.isDestroyed()) {
-              osdWindow.webContents.executeJavaScript(`
-                if (typeof window.hideDpi === 'function') {
-                  window.hideDpi();
-                }
-              `).catch(() => {});
-              try {
-                osdWindow.webContents.send('bgc:osd-hide');
-              } catch (_) {}
+        let detectedGame = null;
+        if (Array.isArray(pollingConfig.games)) {
+          for (const gameExe of pollingConfig.games) {
+            const cleanName = String(gameExe).trim().toLowerCase();
+            if (cleanName && runningExes.has(cleanName)) {
+              detectedGame = cleanName;
+              break;
             }
-            setTimeout(() => {
-              try {
-                if (osdWindow && !osdWindow.isDestroyed()) {
-                  osdWindow.hide();
-                }
-              } catch (_) {}
-            }, 250);
           }
-        } catch (_) {}
-      }, duration);
-    } catch (err) {
-      console.error('[Better Glorious Core] OSD show error:', err.message);
+        }
+
+        evaluateAndApplyPollingRate(Boolean(detectedGame), detectedGame);
+      });
+    } catch (_) {
+      isCheckingProcesses = false;
     }
   }
+
+  function startPollingMonitor() {
+    if (pollingMonitorInterval) {
+      clearInterval(pollingMonitorInterval);
+    }
+    const interval = Math.max(1000, Number(pollingConfig.checkIntervalMs) || 3000);
+    pollingMonitorInterval = setInterval(checkActiveProcesses, interval);
+    setTimeout(checkActiveProcesses, 1500);
+    logDebug('Dynamic Polling Rate monitor initialized.');
+  }
+
+  startPollingMonitor();
 
   function getActiveMouseAndHandler() {
     try {
@@ -965,13 +1032,16 @@ if (electron) {
 
   // Register global DPI telemetry event listener
   global._bgcOnDpiUpdate = function (data) {
-    if (data && typeof data.stageIndex === 'number') {
-      currentDpiStage = data.stageIndex;
+    if (!data) return;
+    const newStage = typeof data.stageIndex === 'number' ? data.stageIndex : currentDpiStage;
+    const newDpi = typeof data.dpi === 'number' ? data.dpi : lastKnownDpi;
+    const hasChanged = (currentDpiStage !== newStage || lastKnownDpi !== newDpi);
+    currentDpiStage = newStage;
+    lastKnownDpi = newDpi;
+    if (hasChanged && isOsdInitialized) {
+      showDpiOsd(data);
     }
-    if (data && typeof data.dpi === 'number') {
-      lastKnownDpi = data.dpi;
-    }
-    showDpiOsd(data);
+    isOsdInitialized = true;
   };
 
   // Intercept EventManager.emit from Glorious Core for battery and DPI updates
@@ -1053,9 +1123,9 @@ if (electron) {
         return;
       }
 
-      // Explicit DPI Stage Packet (e.g. [3, 2, stageIndex] or stripped [2, stageIndex])
-      if ((b0 === 3 && b1 === 2 && typeof data[2] === 'number') || (b0 === 2 && typeof b1 === 'number' && b1 >= 0 && b1 <= 10)) {
-        const stageIdx = (b0 === 3 ? data[2] : b1);
+      // Explicit DPI Stage Packet (e.g. [3, 2, stageIndex])
+      if (b0 === 3 && b1 === 2 && typeof data[2] === 'number' && data[2] >= 0 && data[2] <= 10) {
+        const stageIdx = data[2];
         const stage = stageIdx + 1;
         triggerDpiCycle('set', stage, deviceInfo?.name || defaultDeviceName);
         return;
@@ -1119,16 +1189,20 @@ if (electron) {
               }
               const stageObj = cachedDpiStages[newStage - 1];
               if (stageObj) {
+                const hasChanged = (currentDpiStage !== newStage || lastKnownDpi !== stageObj.value);
                 currentDpiStage = newStage;
                 lastKnownDpi = stageObj.value;
-                logDebug(`IPC DPI change: stage=${newStage}, dpi=${stageObj.value}`);
-                showDpiOsd({
-                  dpi: stageObj.value,
-                  stageIndex: newStage,
-                  totalStages: totalDpiStages,
-                  color: stageObj.color ? (stageObj.color.startsWith('#') ? stageObj.color : '#' + stageObj.color) : undefined,
-                  deviceName: defaultDeviceName || 'Model D 2 Wireless'
-                });
+                if (hasChanged && isOsdInitialized) {
+                  logDebug(`IPC DPI change: stage=${newStage}, dpi=${stageObj.value}`);
+                  showDpiOsd({
+                    dpi: stageObj.value,
+                    stageIndex: newStage,
+                    totalStages: totalDpiStages,
+                    color: stageObj.color ? (stageObj.color.startsWith('#') ? stageObj.color : '#' + stageObj.color) : undefined,
+                    deviceName: defaultDeviceName || 'Model D 2 Wireless'
+                  });
+                }
+                isOsdInitialized = true;
               }
             }
           } catch (_) {}
@@ -1159,15 +1233,29 @@ if (electron) {
       return result;
     });
     ipcMain.handle('bgc:get-osd-state', () => ({
-      enabled: Boolean(powerConfig.osdEnabled),
+      enabled: false,
       position: powerConfig.osdPosition,
-      durationMs: powerConfig.osdDurationMs
+      durationMs: 0
     }));
+
+    ipcMain.handle('bgc:get-polling-config', () => pollingConfig);
+    ipcMain.handle('bgc:set-polling-config', (event, newConfig) => {
+      if (typeof newConfig === 'object' && newConfig !== null) {
+        pollingConfig = { ...pollingConfig, ...newConfig };
+        savePollingConfig();
+        startPollingMonitor();
+        evaluateAndApplyPollingRate(lastGameActive, activeGameName, true);
+      }
+      return pollingConfig;
+    });
   }
 
   if (ipcMain && ipcMain.on) {
     ipcMain.on('bgc:trigger-dpi-osd', (event, data) => {
       showDpiOsd(data);
+    });
+    ipcMain.on('bgc:trigger-polling-osd', (event, data) => {
+      showPollingOsd(data);
     });
   }
 
@@ -1215,9 +1303,12 @@ if (electron) {
 module.exports = {
   initialized: true,
   DEFAULT_POWER_CONFIG: typeof DEFAULT_POWER_CONFIG !== 'undefined' ? DEFAULT_POWER_CONFIG : null,
+  DEFAULT_POLLING_CONFIG: typeof DEFAULT_POLLING_CONFIG !== 'undefined' ? DEFAULT_POLLING_CONFIG : null,
   calculateBatteryEstimate: typeof calculateBatteryEstimate !== 'undefined' ? calculateBatteryEstimate : null,
   calculateOsdPosition: typeof calculateOsdPosition !== 'undefined' ? calculateOsdPosition : null,
   showDpiOsd: typeof showDpiOsd !== 'undefined' ? showDpiOsd : null,
+  showPollingOsd: typeof showPollingOsd !== 'undefined' ? showPollingOsd : null,
+  evaluateAndApplyPollingRate: typeof evaluateAndApplyPollingRate !== 'undefined' ? evaluateAndApplyPollingRate : null,
   formatTrayTooltip: typeof formatTrayTooltip !== 'undefined' ? formatTrayTooltip : null,
   normalizeDeviceId: typeof normalizeDeviceId !== 'undefined' ? normalizeDeviceId : null
 };

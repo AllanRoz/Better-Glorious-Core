@@ -73,6 +73,27 @@
         }
         return null;
       }
+    },
+    polling: {
+      getConfig: async function () {
+        if (ipcRenderer && ipcRenderer.invoke) {
+          return await ipcRenderer.invoke('bgc:get-polling-config');
+        }
+        return null;
+      },
+      setConfig: async function (config) {
+        if (ipcRenderer && ipcRenderer.invoke) {
+          return await ipcRenderer.invoke('bgc:set-polling-config', config);
+        }
+        return null;
+      },
+      trigger: function (pollingData) {
+        if (ipcRenderer && ipcRenderer.send) {
+          ipcRenderer.send('bgc:trigger-polling-osd', pollingData);
+          return true;
+        }
+        return false;
+      }
     }
   };
 

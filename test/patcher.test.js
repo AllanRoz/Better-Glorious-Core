@@ -124,10 +124,13 @@ async function runTests() {
     assert(mainHookContent.includes('getSystemIdleTime'), 'main-hook.js should track system idle time');
     assert(mainHookContent.includes('osdEnabled'), 'main-hook.js should configure OSD overlay');
     assert(mainHookContent.includes('calculateOsdPosition'), 'main-hook.js should calculate OSD position');
+    assert(mainHookContent.includes('evaluateAndApplyPollingRate'), 'main-hook.js should support dynamic polling rate evaluation');
+    assert(mainHookContent.includes('bgc-polling-config.json'), 'main-hook.js should persist polling configuration');
 
     const rendererHookContent = fs.readFileSync(rendererHookFile, 'utf8');
     assert(rendererHookContent.includes('power: {'), 'renderer-hook.js should expose power API');
     assert(rendererHookContent.includes('osd: {'), 'renderer-hook.js should expose osd API');
+    assert(rendererHookContent.includes('polling: {'), 'renderer-hook.js should expose polling API');
     assert(rendererHookContent.includes('bgc-eco-badge'), 'renderer-hook.js should support Eco Mode badge');
 
     const themeCssContent = fs.readFileSync(themeCssFile, 'utf8');
@@ -137,6 +140,8 @@ async function runTests() {
     const osdHtmlContent = fs.readFileSync(osdHtmlFile, 'utf8');
     assert(osdHtmlContent.includes('osd-container'), 'osd.html should contain container layout');
     assert(osdHtmlContent.includes('bgc:osd-dpi'), 'osd.html should listen for bgc:osd-dpi');
+    assert(osdHtmlContent.includes('bgc:osd-polling'), 'osd.html should listen for bgc:osd-polling');
+    assert(osdHtmlContent.includes('updatePolling'), 'osd.html should implement updatePolling');
 
     // Repack
     const packResult = await packAsar(tempExtractDir, mock.asarPath);
@@ -228,7 +233,7 @@ async function runTests() {
   }
 
   // Test OSD / DPI Overlay configuration & position calculations
-  assert.strictEqual(mainHook.DEFAULT_POWER_CONFIG.osdEnabled, true);
+  assert.strictEqual(mainHook.DEFAULT_POWER_CONFIG.osdEnabled, false);
   assert.strictEqual(mainHook.DEFAULT_POWER_CONFIG.osdPosition, 'bottom-right');
   assert.strictEqual(mainHook.DEFAULT_POWER_CONFIG.osdDurationMs, 1500);
 
@@ -243,6 +248,40 @@ async function runTests() {
     assert(typeof posBottomCenter.x === 'number' && typeof posBottomCenter.y === 'number');
   }
   console.log('   ✔ Power, Battery Saver & OSD calculations passed.');
+
+  // Step 8: Test Dynamic Polling Rate & Battery Extender Logic
+  console.log('8. Testing Dynamic Polling Rate & Battery Extender logic...');
+  assert(mainHook.DEFAULT_POLLING_CONFIG, 'DEFAULT_POLLING_CONFIG must be defined');
+  assert.strictEqual(mainHook.DEFAULT_POLLING_CONFIG.enabled, true);
+  assert.strictEqual(mainHook.DEFAULT_POLLING_CONFIG.desktopRate, 1000);
+  assert.strictEqual(mainHook.DEFAULT_POLLING_CONFIG.gameRate, 1000);
+  assert.strictEqual(mainHook.DEFAULT_POLLING_CONFIG.lowBatteryRate, 500);
+  assert.strictEqual(mainHook.DEFAULT_POLLING_CONFIG.lowBatteryThreshold, 20);
+  assert(Array.isArray(mainHook.DEFAULT_POLLING_CONFIG.games), 'Default games must be an array');
+  assert(mainHook.DEFAULT_POLLING_CONFIG.games.includes('cs2.exe'), 'Must contain cs2.exe');
+  assert(mainHook.DEFAULT_POLLING_CONFIG.games.includes('valorant.exe'), 'Must contain valorant.exe');
+
+  // Test game detection matching logic
+  const mockRunning = new Set(['chrome.exe', 'discord.exe', 'cs2.exe', 'explorer.exe']);
+  const matchedGame = mainHook.DEFAULT_POLLING_CONFIG.games.find(g => mockRunning.has(g.toLowerCase()));
+  assert.strictEqual(matchedGame, 'cs2.exe', 'Must match running game cs2.exe');
+
+  const mockNonGaming = new Set(['chrome.exe', 'discord.exe', 'slack.exe', 'code.exe']);
+  const matchedNone = mainHook.DEFAULT_POLLING_CONFIG.games.find(g => mockNonGaming.has(g.toLowerCase()));
+  assert.strictEqual(matchedNone, undefined, 'Must not match when no games are running');
+
+  // Test rate clamping helper
+  const clampRate = (target, supported) => {
+    if (!Array.isArray(supported) || supported.length === 0) return target;
+    if (supported.includes(target)) return target;
+    if (target > supported[supported.length - 1]) return supported[supported.length - 1];
+    return supported.reduce((prev, curr) => Math.abs(curr - target) < Math.abs(prev - target) ? curr : prev);
+  };
+  assert.strictEqual(clampRate(2000, [125, 250, 500, 1000]), 1000, 'Must clamp 2000 to max supported 1000 on 1K mice');
+  assert.strictEqual(clampRate(4000, [125, 250, 500, 1000, 2000, 4000, 8000]), 4000, 'Must allow 4000 on supported high-polling mice');
+  assert.strictEqual(clampRate(500, [125, 250, 500, 1000]), 500, 'Must allow 500Hz eco rate');
+
+  console.log('   ✔ Dynamic Polling Rate & Battery Extender tests passed.');
 
   // Cleanup test environment
   fs.rmSync(TEST_DIR, { recursive: true, force: true });

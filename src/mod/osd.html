@@ -198,6 +198,8 @@
 
       // Update text values
       dpiNum.textContent = String(dpi);
+      const unitEl = document.querySelector('.dpi-unit');
+      if (unitEl) unitEl.textContent = 'DPI';
       
       const stageStr = `Stage ${stageIndex} of ${totalStages}`;
       metaInfo.textContent = profileName ? `${stageStr} • ${profileName}` : `${stageStr} • ${deviceName}`;
@@ -217,7 +219,54 @@
       container.classList.add('visible');
     }
 
+    function updatePolling(data) {
+      if (!data) return;
+
+      const rate = data.pollingRate || 1000;
+      const reason = data.reason || 'Dynamic Polling';
+      const deviceName = data.deviceName || 'Mouse';
+
+      let color = data.isLowBattery ? '#FF9100' : (data.isGame ? '#00E5FF' : '#00E676');
+
+      document.documentElement.style.setProperty('--accent-color', color);
+      document.documentElement.style.setProperty('--accent-glow', color + '4D');
+      document.documentElement.style.setProperty('--icon-bg', color + '22');
+
+      dpiNum.textContent = String(rate);
+      const unitEl = document.querySelector('.dpi-unit');
+      if (unitEl) unitEl.textContent = 'Hz';
+      metaInfo.textContent = `${reason} • ${deviceName}`;
+
+      stagesBar.innerHTML = '';
+      const rates = [500, 1000, 2000, 4000, 8000];
+      const maxIdx = rates.indexOf(rate);
+      for (let i = 0; i < 4; i++) {
+        const pill = document.createElement('div');
+        pill.className = 'stage-pill' + (i <= (maxIdx === -1 ? 1 : Math.min(i, maxIdx)) ? ' active' : '');
+        stagesBar.appendChild(pill);
+      }
+
+      container.classList.remove('bump');
+      void container.offsetWidth;
+      container.classList.add('bump');
+      container.classList.add('visible');
+    }
+
+    let internalHideTimer = null;
+    function resetInternalHideTimer() {
+      if (internalHideTimer) {
+        clearTimeout(internalHideTimer);
+      }
+      internalHideTimer = setTimeout(() => {
+        hideDpi();
+      }, 1800);
+    }
+
     function hideDpi() {
+      if (internalHideTimer) {
+        clearTimeout(internalHideTimer);
+        internalHideTimer = null;
+      }
       container.classList.remove('visible');
     }
 
@@ -227,6 +276,11 @@
       if (electron && electron.ipcRenderer) {
         electron.ipcRenderer.on('bgc:osd-dpi', (event, data) => {
           updateDpi(data);
+          resetInternalHideTimer();
+        });
+        electron.ipcRenderer.on('bgc:osd-polling', (event, data) => {
+          updatePolling(data);
+          resetInternalHideTimer();
         });
         electron.ipcRenderer.on('bgc:osd-hide', () => {
           hideDpi();
@@ -235,7 +289,14 @@
     } catch (_) {}
 
     // Expose update functions on window
-    window.updateDpi = updateDpi;
+    window.updateDpi = function(data) {
+      updateDpi(data);
+      resetInternalHideTimer();
+    };
+    window.updatePolling = function(data) {
+      updatePolling(data);
+      resetInternalHideTimer();
+    };
     window.hideDpi = hideDpi;
   </script>
 </body>

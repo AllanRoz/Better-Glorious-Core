@@ -21,7 +21,7 @@ function printBanner() {
   ╔═══════════════════════════════════════════════════════════════╗
   ║                                                               ║
   ║     ⚡  B E T T E R   G L O R I O U S   C O R E  ⚡           ║
-  ║        Open-Source Mod & Automated Patcher v${pkg.version.padEnd(16)}║
+  ║        Open-Source Mod & Automated Patcher v${pkg.version.padEnd(16)}  ║
   ║                                                               ║
   ╚═══════════════════════════════════════════════════════════════╝
   `));
