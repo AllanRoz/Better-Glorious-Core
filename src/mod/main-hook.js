@@ -321,10 +321,10 @@ if (electron) {
         const raw = JSON.parse(fs.readFileSync(BATTERY_CACHE_FILE, 'utf8'));
         if (typeof raw === 'object' && raw !== null) {
           const now = Date.now();
-          const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+          const MAX_HISTORY_MS = 48 * 60 * 60 * 1000;
           for (const [k, v] of Object.entries(raw)) {
             if (v && Array.isArray(v.history)) {
-              v.history = v.history.filter((pt) => (now - pt.time) <= ONE_DAY_MS);
+              v.history = v.history.filter((pt) => (now - pt.time) <= MAX_HISTORY_MS);
             }
             _deviceBatteryStates.set(k, v);
           }
@@ -472,6 +472,9 @@ if (electron) {
     return tooltipText;
   }
 
+  const ONE_HOUR_MS = 60 * 60 * 1000;
+  let lastHourlyCheckTime = Date.now();
+
   function updateTrayBattery(deviceId, level, isCharging) {
     if (deviceId && typeof level === 'number') {
       const normId = normalizeDeviceId(deviceId);
@@ -479,21 +482,26 @@ if (electron) {
       const rawHistory = Array.isArray(existing.history) ? [...existing.history] : [];
 
       const now = Date.now();
-      const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-      // Retain points within the past 24 hours
-      const history = rawHistory.filter((pt) => (now - pt.time) <= ONE_DAY_MS);
+      const MAX_HISTORY_MS = 48 * 60 * 60 * 1000;
+      // Retain points within the past 48 hours
+      const history = rawHistory.filter((pt) => (now - pt.time) <= MAX_HISTORY_MS);
 
       const lastPoint = history.length > 0 ? history[history.length - 1] : null;
       const shouldRecord = (
         !lastPoint ||
         lastPoint.level !== level ||
         Boolean(lastPoint.isCharging) !== Boolean(isCharging) ||
-        (now - lastPoint.time > 5 * 60 * 1000)
+        (now - lastPoint.time >= 20 * 60 * 1000)
       );
 
       if (shouldRecord) {
-        history.push({ time: now, level, isCharging: Boolean(isCharging) });
-        if (history.length > 300) history.shift();
+        history.push({
+          time: now,
+          level,
+          isCharging: Boolean(isCharging),
+          isHourlyCheck: !lastPoint || (now - lastPoint.time >= ONE_HOUR_MS)
+        });
+        if (history.length > 500) history.shift();
       }
 
       const ecoActive = Boolean(
@@ -628,6 +636,64 @@ if (electron) {
     }
   }
 
+  /**
+   * Checks the battery percentage every hour and populates the telemetry history
+   * with the respective battery level at the respective time.
+   */
+  function checkHourlyBattery() {
+    const now = Date.now();
+    lastHourlyCheckTime = now;
+
+    // 1. Request fresh battery stats via HID if hook is available
+    if (typeof global._bgcRequestBatteryStats === 'function') {
+      try {
+        global._bgcRequestBatteryStats();
+      } catch (_) {}
+    }
+
+    // 2. Ensure each known device has an hourly checkpoint recorded
+    let changed = false;
+    for (const [normId, state] of _deviceBatteryStates.entries()) {
+      if (state && typeof state.level === 'number') {
+        const rawHistory = Array.isArray(state.history) ? [...state.history] : [];
+        const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+        const history = rawHistory.filter((pt) => (now - pt.time) <= ONE_DAY_MS);
+        const lastPoint = history.length > 0 ? history[history.length - 1] : null;
+
+        // Record hourly entry if no point in past 50 minutes (to avoid duplicate right after state change)
+        if (!lastPoint || (now - lastPoint.time >= 50 * 60 * 1000)) {
+          history.push({
+            time: now,
+            level: state.level,
+            isCharging: Boolean(state.isCharging),
+            isHourlyCheck: true
+          });
+          if (history.length > 300) history.shift();
+          state.history = history;
+          state.time = now;
+          changed = true;
+
+          // Broadcast update to open renderer windows
+          broadcastToWindows('bgc:battery-update', {
+            deviceId: normId,
+            level: state.level,
+            isCharging: Boolean(state.isCharging),
+            estimate: calculateBatteryEstimate(state),
+            history: state.history
+          });
+        }
+      }
+    }
+
+    if (changed) {
+      saveBatteryCache();
+    }
+  }
+
+  // Periodic 1-Hour Battery Check Timer
+  const hourlyBatteryTimer = setInterval(checkHourlyBattery, ONE_HOUR_MS);
+  if (hourlyBatteryTimer.unref) hourlyBatteryTimer.unref();
+
   // Register battery telemetry event listener
   global._bgcOnBatteryUpdate = function (deviceId, level, isCharging) {
     updateTrayBattery(deviceId, level, isCharging);
@@ -657,6 +723,10 @@ if (electron) {
       try {
         global._bgcRequestBatteryStats();
       } catch (_) {}
+    }
+    // If system was suspended/locked for more than 1 hour, trigger hourly check
+    if (Date.now() - lastHourlyCheckTime >= ONE_HOUR_MS) {
+      checkHourlyBattery();
     }
   }
 
@@ -1279,11 +1349,49 @@ if (electron) {
       }
       return result;
     });
+    ipcMain.handle('bgc:report-battery', (event, data) => {
+      if (data && typeof data.level === 'number') {
+        const devId = data.deviceId || defaultDeviceName || 'Wireless Mouse';
+        updateTrayBattery(devId, data.level, Boolean(data.isCharging));
+        return true;
+      }
+      return false;
+    });
+    if (ipcMain.on) {
+      ipcMain.on('bgc:report-battery', (event, data) => {
+        if (data && typeof data.level === 'number') {
+          const devId = data.deviceId || defaultDeviceName || 'Wireless Mouse';
+          updateTrayBattery(devId, data.level, Boolean(data.isCharging));
+        }
+      });
+    }
+
     ipcMain.handle('bgc:get-battery-history', (event, deviceId) => {
       if (deviceId) {
         const norm = normalizeDeviceId(deviceId);
-        const state = _deviceBatteryStates.get(norm);
-        return state?.history || [];
+        let state = _deviceBatteryStates.get(norm);
+        if (!state) {
+          for (const [k, v] of _deviceBatteryStates.entries()) {
+            if (normalizeDeviceId(k).toLowerCase() === norm.toLowerCase()) {
+              state = v;
+              break;
+            }
+          }
+        }
+        if (state) return state.history || [];
+      }
+      // If exactly 1 device is registered or deviceId was not specified, return the primary device's history array
+      if (_deviceBatteryStates.size === 1) {
+        const first = _deviceBatteryStates.values().next().value;
+        return first?.history || [];
+      }
+      if (_deviceBatteryStates.size > 1 && !deviceId) {
+        // Return first non-empty history array if available
+        for (const v of _deviceBatteryStates.values()) {
+          if (Array.isArray(v.history) && v.history.length > 0) {
+            return v.history;
+          }
+        }
       }
       const result = {};
       for (const [k, v] of _deviceBatteryStates.entries()) {
@@ -1296,6 +1404,11 @@ if (electron) {
       position: powerConfig.osdPosition,
       durationMs: 0
     }));
+
+    ipcMain.handle('bgc:check-battery-hourly', () => {
+      checkHourlyBattery();
+      return true;
+    });
 
     ipcMain.handle('bgc:get-polling-config', () => pollingConfig);
     ipcMain.handle('bgc:set-polling-config', (event, newConfig) => {
@@ -1369,7 +1482,11 @@ module.exports = {
   showPollingOsd: typeof showPollingOsd !== 'undefined' ? showPollingOsd : null,
   evaluateAndApplyPollingRate: typeof evaluateAndApplyPollingRate !== 'undefined' ? evaluateAndApplyPollingRate : null,
   formatTrayTooltip: typeof formatTrayTooltip !== 'undefined' ? formatTrayTooltip : null,
-  normalizeDeviceId: typeof normalizeDeviceId !== 'undefined' ? normalizeDeviceId : null
+  normalizeDeviceId: typeof normalizeDeviceId !== 'undefined' ? normalizeDeviceId : null,
+  checkHourlyBattery: typeof checkHourlyBattery !== 'undefined' ? checkHourlyBattery : null,
+  updateTrayBattery: typeof updateTrayBattery !== 'undefined' ? updateTrayBattery : null,
+  ONE_HOUR_MS: typeof ONE_HOUR_MS !== 'undefined' ? ONE_HOUR_MS : 3600000,
+  getDeviceBatteryStates: () => _deviceBatteryStates
 };
 
 
