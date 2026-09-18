@@ -134,6 +134,29 @@ class Device {
   }
 }
 
+function getHIDValue(functionCode) {
+  return DeviceFunctionCodeHIDValueMap[functionCode] ?? 0;
+}
+
+class MacroState {
+  static fromRecord(record) {
+    const state = new MacroState(record.id);
+    state.mode = record.mode;
+    return state;
+  }
+  static fromStateProperties(stateProperties) {
+    const state = new MacroState(stateProperties.id);
+    state.mode = stateProperties.mode ?? state.mode;
+    return state;
+  }
+}
+
+const HWMacroModes2 = {
+  [MacroMode.NoRepeat]: 1,
+  [MacroMode.RepeatWhileHolding]: 224,
+  [MacroMode.Toggle]: 225
+};
+
 function initApp() {
   const TrayIcon = new electron.Tray();
   TrayIcon.setToolTip("Glorious Core");

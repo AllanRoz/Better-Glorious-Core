@@ -1,6 +1,7 @@
 const { applyBranding } = require('./branding');
 const { injectHookLoader } = require('./hook-loader');
 const { applyBatteryPatch } = require('./battery');
+const { applyMacroPatch } = require('./macro');
 const { applyTelemetryPatch } = require('./telemetry');
 const { applyUpdaterPatch } = require('./updater');
 
@@ -22,6 +23,11 @@ const PATCHES = [
     name: 'Battery Percentage & Telemetry Fix',
     description: 'Enables numeric battery percentage in UI and fixes HID unpadded hex telemetry bug',
     execute: (extractedDir) => applyBatteryPatch(extractedDir)
+  },
+  {
+    name: 'Macro Encoder & Hardware Execution Fix',
+    description: 'Fixes mouse-click macro keycodes, normalizes legacy macro modes, and synchronizes datastore macros',
+    execute: (extractedDir) => applyMacroPatch(extractedDir)
   },
   {
     name: 'Telemetry & Analytics Blocker',

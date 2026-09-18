@@ -55,7 +55,7 @@ async function runTests() {
 
     // Run Patches
     const patchResults = runPatches(tempExtractDir);
-    assert.strictEqual(patchResults.length, 5, 'Should execute 5 registered patches');
+    assert.strictEqual(patchResults.length, 6, 'Should execute 6 registered patches');
 
     // Check package.json modifications
     const patchedPkg = JSON.parse(fs.readFileSync(path.join(tempExtractDir, 'package.json'), 'utf8'));
@@ -82,6 +82,12 @@ async function runTests() {
     assert(!patchedMain.includes('specificDeviceHandler?.updateAllKeyBinding'), 'Main file should NOT overwrite keybindings on device connect');
     assert(patchedMain.includes('global._bgcDeviceClass = Device;'), 'Main file should expose Device class for hardware sync');
     assert(patchedMain.includes('_chunkDelay = _bIdx === 0 ? 5 : delay'), 'Main file should optimize setPerformance packet delays to <50ms');
+
+    // Check Macro Encoder Patch modifications
+    assert(patchedMain.includes('_mouseMacroMap'), 'Main file should include mouse button HID macro map');
+    assert(patchedMain.includes('LeftButton: 240'), 'Main file should map LeftButton to HID 240');
+    assert(patchedMain.includes('Once') && patchedMain.includes('NoRepeat'), 'Main file should normalize Once to NoRepeat');
+    assert(patchedMain.includes('RepeatWhilePressed') && patchedMain.includes('RepeatWhileHolding'), 'Main file should normalize RepeatWhilePressed');
 
     // Check Telemetry Blocker Patch modifications
     assert(patchedMain.includes('enabled:false,'), 'Main file should disable Sentry initialization');
