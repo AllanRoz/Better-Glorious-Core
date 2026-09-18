@@ -637,21 +637,13 @@ if (electron) {
   }
 
   /**
-   * Checks the battery percentage every hour and populates the telemetry history
-   * with the respective battery level at the respective time.
+   * Passive battery checkpoint handler (does not aggressively ping wireless HID to prevent battery drain).
    */
   function checkHourlyBattery() {
     const now = Date.now();
     lastHourlyCheckTime = now;
 
-    // 1. Request fresh battery stats via HID if hook is available
-    if (typeof global._bgcRequestBatteryStats === 'function') {
-      try {
-        global._bgcRequestBatteryStats();
-      } catch (_) {}
-    }
-
-    // 2. Ensure each known device has an hourly checkpoint recorded
+    // Ensure each known device has state persisted if available
     let changed = false;
     for (const [normId, state] of _deviceBatteryStates.entries()) {
       if (state && typeof state.level === 'number') {
@@ -660,7 +652,6 @@ if (electron) {
         const history = rawHistory.filter((pt) => (now - pt.time) <= ONE_DAY_MS);
         const lastPoint = history.length > 0 ? history[history.length - 1] : null;
 
-        // Record hourly entry if no point in past 50 minutes (to avoid duplicate right after state change)
         if (!lastPoint || (now - lastPoint.time >= 50 * 60 * 1000)) {
           history.push({
             time: now,
@@ -689,10 +680,6 @@ if (electron) {
       saveBatteryCache();
     }
   }
-
-  // Periodic 1-Hour Battery Check Timer
-  const hourlyBatteryTimer = setInterval(checkHourlyBattery, ONE_HOUR_MS);
-  if (hourlyBatteryTimer.unref) hourlyBatteryTimer.unref();
 
   // Register battery telemetry event listener
   global._bgcOnBatteryUpdate = function (deviceId, level, isCharging) {

@@ -308,12 +308,12 @@ async function runTests() {
 
   console.log('   ✔ Dynamic Polling Rate & Battery Extender tests passed.');
 
-  // Step 9: Test Hourly Battery Check & Respective Time Graph Population
-  console.log('9. Testing Hourly Battery Check & Graph Population logic...');
+  // Step 9: Test Simple Battery Percentage Display & Low-Power Telemetry Logic
+  console.log('9. Testing Simple Battery Percentage & Low-Power Telemetry logic...');
   assert.strictEqual(mainHook.ONE_HOUR_MS, 3600000, 'ONE_HOUR_MS must be 3600000 (1 hour)');
   assert(typeof mainHook.checkHourlyBattery === 'function', 'checkHourlyBattery must be a function');
 
-  // Test checkHourlyBattery recording logic
+  // Test checkHourlyBattery passive checkpoint logic
   const devStates = mainHook.getDeviceBatteryStates();
   const testDevId = 'test-hourly-mouse';
   devStates.set(testDevId, {
@@ -346,52 +346,30 @@ async function runTests() {
     assert(trayState.history.length >= 2, 'updateTrayBattery should record new point when >= 1 hour elapsed even if level is unchanged');
   }
 
-  // Test SVG Graph population: only checked hours are populated, no fake points
+  // Test Simple Battery Percentage Formatter (_bgcFormatBattery)
+  global.window = global.window || {};
+  delete require.cache[require.resolve('../src/mod/renderer-hook')];
   const rendererHook = require('../src/mod/renderer-hook');
-  assert(typeof rendererHook.generateBatterySvg === 'function', 'generateBatterySvg must be exported');
 
-  // Test 1: Empty history should have 0 dots and show empty state message
-  const emptySvg = rendererHook.generateBatterySvg([], 80, false);
-  assert(emptySvg.includes('bgc-svg-chart'), 'SVG must include bgc-svg-chart class');
-  assert(emptySvg.includes('No battery telemetry collected yet'), 'SVG must show empty state when no data collected yet');
-  const emptyDotMatches = emptySvg.match(/class="bgc-chart-dot"/g) || [];
-  assert.strictEqual(emptyDotMatches.length, 0, 'Must not populate any points when no data has been collected yet');
+  assert(typeof global.window._bgcFormatBattery === 'function', '_bgcFormatBattery must be registered on window');
 
-  // Test 2: History with collected points should only populate the actual collected points
-  const now = Date.now();
-  const sampleHistory = [
-    { time: now - 3600000 * 12, level: 90, isCharging: false },
-    { time: now - 3600000 * 6, level: 85, isCharging: false },
-    { time: now, level: 80, isCharging: false }
-  ];
-  const svg = rendererHook.generateBatterySvg(sampleHistory, 80, false);
-  const dotMatches = svg.match(/class="bgc-chart-dot"/g) || [];
-  assert.strictEqual(dotMatches.length, 3, `Graph must only populate checked points (expected 3, found ${dotMatches.length})`);
-  assert(!svg.includes('No battery telemetry collected yet'), 'Should not show empty state when points exist');
-  assert(svg.includes('24h ago'), 'SVG must include 24h timeline label');
-  assert(svg.includes('Now'), 'SVG must include Now timeline label');
+  // Test 1: Normal discharging returns clean simple percentage
+  const dischargingVal = global.window._bgcFormatBattery(85, false);
+  assert.strictEqual(dischargingVal, '85%', 'Discharging battery should return simple percentage without hours remaining');
 
-  // Test 3: Single point history should draw projection baseline and pulse halo without showing empty message
-  const singleHistory = [{ time: now - 3600000, level: 75, isCharging: false }];
-  const singleSvg = rendererHook.generateBatterySvg(singleHistory, 75, false);
-  const singleDotMatches = singleSvg.match(/class="bgc-chart-dot"/g) || [];
-  assert.strictEqual(singleDotMatches.length, 1, 'Must render exactly 1 dot for single checkpoint');
-  assert(!singleSvg.includes('No battery telemetry collected yet'), 'Must not show empty message when 1 checkpoint exists');
-  assert(singleSvg.includes('bgc-dot-pulse'), 'Must render pulse halo on single checkpoint');
+  // Test 2: Charging returns clean charging status
+  const chargingVal = global.window._bgcFormatBattery(85, true);
+  assert.strictEqual(chargingVal, '85% (Charging)', 'Charging battery should return simple percentage with (Charging)');
 
-  // Test 4: Time window filtering (6h should filter out points older than 6 hours)
-  const windowHistory = [
-    { time: now - 3600000 * 18, level: 95, isCharging: false },
-    { time: now - 3600000 * 10, level: 85, isCharging: false },
-    { time: now - 3600000 * 2, level: 75, isCharging: false },
-    { time: now, level: 70, isCharging: false }
-  ];
-  const svg6h = rendererHook.generateBatterySvg(windowHistory, 70, false, { timeRange: '6h' });
-  const dots6h = svg6h.match(/class="bgc-chart-dot"/g) || [];
-  assert.strictEqual(dots6h.length, 2, '6h window should only render points within the past 6 hours');
-  assert(svg6h.includes('6h ago'), '6h window must include 6h ago timeline label');
+  // Test 3: Fully charged 100%
+  const fullVal = global.window._bgcFormatBattery(100, true);
+  assert.strictEqual(fullVal, '100%', 'Fully charged battery should return 100%');
 
-  console.log('   ✔ Hourly Battery Check & Respective Time Graph Population tests passed.');
+  // Test 4: Chart removal / stub safety
+  assert(typeof rendererHook.generateBatterySvg === 'function', 'generateBatterySvg must be safely exported');
+  assert.strictEqual(rendererHook.generateBatterySvg(), '', 'generateBatterySvg should return empty string since chart is removed');
+
+  console.log('   ✔ Simple Battery Percentage & Low-Power Telemetry tests passed.');
 
   // Cleanup test environment
   fs.rmSync(TEST_DIR, { recursive: true, force: true });

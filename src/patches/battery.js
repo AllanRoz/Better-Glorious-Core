@@ -106,12 +106,7 @@ function _bgcFormatBattery(val, isChg) {
   if (val == null || isNaN(val)) return void 0;
   var n = Number(val);
   if (isChg) return n >= 100 ? "100%" : n + "% (Charging)";
-  var r = 1.6;
-  try {
-    if (window._bgcDischargeRate && window._bgcDischargeRate > 0.5) r = window._bgcDischargeRate;
-  } catch(_) {}
-  var h = Math.max(1, Math.round(n / r));
-  return n + "% (~" + h + "h)";
+  return n + "%";
 };
 `;
         content = formatterFn + content;
@@ -506,12 +501,11 @@ function _bgcParseBattery(deviceId, rawValue, currentChargingState) {
       };
       setTimeout(_bgcPoll, 200);
       setTimeout(_bgcPoll, 1200);
-      setInterval(_bgcPoll, 30000);
       global._bgcRequestBatteryStats = _bgcPoll;
     } catch (_) {}
 `
     );
-    statusLogs.push('Injected startup & periodic HID battery polling into MouseV2 and MouseV2Pro device handlers');
+    statusLogs.push('Injected initial HID battery query into MouseV2 and MouseV2Pro device handlers');
   }
 
   if (content !== original) {
