@@ -237,22 +237,6 @@ const pid = \`0x\${rawPid.toString(16).toLowerCase().padStart(4, "0")}\`;`;
     statusLogs.push('Hooked hardwareStatus.batteryLevel setter in main process');
   }
 
-  // Target A.6: Hook MouseV2 button reports for DPI HUD cycling
-  const mouseV2BtnPattern = /else\s+if\s*\(\s*data\[0\]\s*==\s*6\s*&&\s*data\[1\]\s*==\s*249\s*&&\s*data\[2\]\s*>=\s*128\s*\)\s*\{/g;
-  if (mouseV2BtnPattern.test(content)) {
-    content = content.replace(
-      mouseV2BtnPattern,
-      `else if (((data[0] == 6 && (data[1] == 249 || data[1] == 247) && data[2] >= 128) || ((data[0] == 249 || data[0] == 247) && data[1] >= 128))) {
-        try {
-          const _btnId = data[0] == 6 ? data[3] : data[2];
-          if (typeof global._bgcOnDpiButtonPress === 'function' && (_btnId == 5 || _btnId == 6 || _btnId == 8)) {
-            global._bgcOnDpiButtonPress(_btnId, device, this);
-          }
-        } catch (_) {}`
-    );
-    statusLogs.push('Hooked MouseV2 button handler for physical DPI button cycling');
-  }
-
   // Target A.7: Hook installTray to register global._bgcTray immediately
   const installTrayPattern = /(TrayIcon\s*=\s*new\s+electron\.Tray\([^)]+\);)/g;
   if (installTrayPattern.test(content)) {
@@ -287,82 +271,49 @@ const pid = \`0x\${rawPid.toString(16).toLowerCase().padStart(4, "0")}\`;`;
     statusLogs.push('Hooked setPerformance to trigger live DPI OSD on UI changes');
   }
 
-  // Target A.9: Route DPI buttons to host notification in default and explicit keybuffers
-  // Default keybuffers: change button 5 from internal 102 to host notification 4, 1
-  const defaultKeyBufPattern = /(1,\s*5,\s*0,\s*0,\s*)102,\s*3(,\s*0,\s*0)/g;
-  if (defaultKeyBufPattern.test(content)) {
-    content = content.replace(defaultKeyBufPattern, '$14,\n  1$2');
-    statusLogs.push('Replaced silent internal DPI button byte (102) with host notification (4, 1) in DEFAULT_KEY_BUFFER');
-  }
-
-  // Explicit binding: PrepareKeybindingBuffers and PrepareKeybindingBuffers2
-  const p1Pattern = /(if\s*\(\s*isDPI\s*\)\s*\{\s*)(dataBuffer\[dataOffset\]\s*=\s*102;)(\s*\}\s*else\s*\{)/g;
-  if (p1Pattern.test(content)) {
+  // Target A.9: Add resetKeybindingProperties to MouseDeviceHandler to fix "Reset to default" on all mice
+  const mouseDeviceHandlerPattern = /(class\s+MouseDeviceHandler\s+extends\s+GloriousDeviceHandler\s*\{)/g;
+  if (mouseDeviceHandlerPattern.test(content)) {
     content = content.replace(
-      p1Pattern,
-      `if (isDPI) {
-        if (target.functionIdentifier !== MouseFunctionType.DPIShift) {
-          dataBuffer[dataOffset] = 4;
-          dataBuffer[dataOffset + 1] = 1;
-        } else {
-          dataBuffer[dataOffset] = 102;
-        }
-      } else {`
+      mouseDeviceHandlerPattern,
+      `$1
+  static async resetKeybindingProperties(device) {
+    const previousRendererState = RendererDeviceState.fromStateProperties(device.rendererState);
+    const newProfiles = device.deviceProfiles.map((item) => {
+      const update = new DeviceProfileState();
+      update.id = item.id;
+      update.name = item.name;
+      update.order = item.order;
+      update.mousePerformanceState = MousePerformanceState.fromStateProperties(item.mousePerformanceState);
+      update.presetLightingState = PresetLightingState.fromStateProperties(item.presetLightingState);
+      update.layers = item.id == previousRendererState.currentProfileData.id ? new DeviceProfileLayersState() : DeviceProfileLayersState.fromStateProperties(item.layers);
+      return update;
+    });
+    device.deviceProfiles = newProfiles;
+    device.rendererState.currentProfileData = device.deviceProfiles.find(
+      (item) => item.id == previousRendererState.currentProfileData.id
     );
-    statusLogs.push('Patched PrepareKeybindingBuffers to route DPI cycle buttons to host notification (4, 1)');
+    await this.updateAllKeyBinding(device.rendererState, [
+      new DeviceKeybindingState(),
+      new DeviceKeybindingState()
+    ]);
+    DataStorage.saveDeviceInstance(device.toRecord());
+    DataStorage.saveDeviceProfile(device.rendererState.currentProfileData);
+    return device.rendererState;
+  }`
+    );
+    statusLogs.push('Added resetKeybindingProperties to MouseDeviceHandler to fix "Reset to default" on all Glorious mice');
   }
 
-  // Explicit binding: setBufferValueFromBinding and setBufferValueFromBinding$1
-  const p2Pattern = /(if\s*\(\s*isDPI\s*\)\s*\{\s*)(dataBuffer\[hidButtonId\s*\*\s*4\s*\+\s*0\s*\+\s*layerOffset\]\s*=\s*102;)(\s*\}\s*else\s*\{)/g;
-  if (p2Pattern.test(content)) {
-    content = content.replace(
-      p2Pattern,
-      `if (isDPI) {
-        if (boundData.target.functionIdentifier !== MouseFunctionType.DPIShift) {
-          dataBuffer[hidButtonId * 4 + 0 + layerOffset] = 4;
-          dataBuffer[hidButtonId * 4 + 1 + layerOffset] = 1;
-        } else {
-          dataBuffer[hidButtonId * 4 + 0 + layerOffset] = 102;
-        }
-      } else {`
-    );
-    statusLogs.push('Patched setBufferValueFromBinding to route DPI cycle buttons to host notification (4, 1)');
-  }
-
-  // Target A.10: Auto-push keybindings on device connect to program mouse onboard flash
+  // Target A.10: Expose Device class for hardware state inspection
   const devInitPattern = /(Device\.gloriousDevices\.push\(device\);)/g;
   if (devInitPattern.test(content)) {
     content = content.replace(
       devInitPattern,
       `$1
-    try { global._bgcDeviceClass = Device; } catch (_) {}
-    try {
-      if (device && (device?.supportedDeviceData?.category === 'Mouse' || device?.supportedDeviceData?.category === DeviceCategory.Mouse) && typeof specificDeviceHandler?.updateAllKeyBinding === 'function') {
-        setTimeout(async () => {
-          try {
-            const _p = device.rendererState?.currentProfileData;
-            if (_p) {
-              const _layers = _p.layers || {};
-              const _keyStates = [
-                _layers[0]?.keybindingData || new DeviceKeybindingState(),
-                _layers[1]?.keybindingData || new DeviceKeybindingState(),
-                _layers[2]?.keybindingData || new DeviceKeybindingState()
-              ];
-              await specificDeviceHandler.updateAllKeyBinding(device.rendererState, _keyStates);
-              if (typeof global._bgcLog === 'function') {
-                global._bgcLog('Auto-synced mouse keybindings for DPI HUD reporting');
-              }
-            }
-          } catch (err) {
-            if (typeof global._bgcLog === 'function') {
-              global._bgcLog('Auto-sync keybindings error: ' + (err?.message || err));
-            }
-          }
-        }, 1200);
-      }
-    } catch (_) {}`
+    try { global._bgcDeviceClass = Device; } catch (_) {}`
     );
-    statusLogs.push('Hooked Device.init to automatically sync keybindings to mouse onboard flash');
+    statusLogs.push('Hooked Device.init to register global._bgcDeviceClass');
   }
 
   // Target A.11: Optimize setPerformance report transmission delays and async persistence (<50ms)

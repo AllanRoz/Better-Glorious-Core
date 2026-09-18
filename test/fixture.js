@@ -118,17 +118,12 @@ const DEFAULT_KEY_BUFFER = Buffer.from([
   1, 161, 0, 0
 ]);
 
-function mockKeybindings(dataBuffer, target, dataOffset, hidButtonId, layerOffset, boundData) {
-  if (isDPI) {
-    dataBuffer[dataOffset] = 102;
-  } else {
-    dataBuffer[dataOffset] = 1;
-  }
-
-  if (isDPI) {
-    dataBuffer[hidButtonId * 4 + 0 + layerOffset] = 102;
-  } else {
-    dataBuffer[hidButtonId * 4 + 0 + layerOffset] = 1;
+class GloriousDeviceHandler {
+  static resetKeybindingProperties(_device) {}
+}
+class MouseDeviceHandler extends GloriousDeviceHandler {
+  static updateAllKeyBinding(_deviceState, _deviceKeybindingStates) {
+    throw new Error("Not Implemented");
   }
 }
 

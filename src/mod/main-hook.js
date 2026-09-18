@@ -1233,42 +1233,6 @@ if (electron) {
         triggerDpiCycle('set', stage, deviceInfo?.name || defaultDeviceName);
         return;
       }
-
-      // Physical Mouse Button Click Packet (Report 6, Command 249/247/248 or Report 4/7 or stripped)
-      const isButtonReport = (
-        (b0 === 6 && (b1 === 249 || b1 === 247 || b1 === 248)) ||
-        (b0 === 4 && (b1 === 249 || b1 === 247 || b1 === 248)) ||
-        (b0 === 7 && b1 === 83) ||
-        (b0 === 249 || b0 === 247 || b0 === 248)
-      );
-
-      if (isButtonReport) {
-        // Ignore button release (keyup) events - only trigger on press (bit 7 set / >= 128)
-        const isKeyDown = (b0 === 249 || b0 === 247 || b0 === 248) ? (data[1] >= 128) : (data[2] >= 128);
-        if (!isKeyDown) {
-          return;
-        }
-
-        const b2 = data[2];
-        const b3 = data[3];
-        // Button IDs from Glorious DeviceButtonMapping: 5 = DPICycleUp, 6 = DPICycleDown, 8 = DPIShift
-        const isDpiUp = (b3 === 5 || (b0 === 249 && b2 === 5));
-        const isDpiDown = (b3 === 6 || (b0 === 249 && b2 === 6));
-        const isDpiShift = (b3 === 8 || (b0 === 249 && b2 === 8));
-
-        if (isDpiUp || isDpiDown || isDpiShift) {
-          if (typeof global._bgcOnDpiButtonPress === 'function') {
-            global._bgcOnDpiButtonPress(isDpiDown ? 6 : 5);
-          } else {
-            const devName = deviceInfo?.name || defaultDeviceName || 'Model D 2 Wireless';
-            if (isDpiDown) {
-              triggerDpiCycle('down', null, devName);
-            } else {
-              triggerDpiCycle('up', null, devName);
-            }
-          }
-        }
-      }
     } catch (_) {}
   };
 
